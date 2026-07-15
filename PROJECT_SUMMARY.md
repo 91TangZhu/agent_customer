@@ -152,13 +152,11 @@ conda activate agent_customer
 
 # 首次运行：安装依赖 + 初始化数据库 + 下载嵌入模型
 pip install -r requirements.txt
-python db_init.py
-# 手动将 text2vec-base-chinese 模型文件放入 data/models/
-
-# 启动服务
+# 启动服务（每次开机只需这两步）
+conda activate agent_customer
 uvicorn app.main:app --reload
 # 浏览器打开 http://localhost:8000
-# 默认管理员账号: admin / admin123
+# 默认管理员账号: admin / 123456
 ```
 
 ---

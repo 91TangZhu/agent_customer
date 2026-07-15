@@ -134,7 +134,8 @@ agent_customer/
 ├── db_init.py               # 数据库 + 种子数据初始化
 ├── requirements.txt          # pip 依赖清单
 ├── PROJECT_SUMMARY.md       # 项目档案
-└── CLAUDE_PROGRESS.md       # 开发进度追踪
+├── CLAUDE_PROGRESS.md       # 开发进度追踪
+└── INTERVIEW_PREP.md        # 面试准备文档
 ```
 
 ## 对话示例
