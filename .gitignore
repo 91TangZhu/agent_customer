@@ -13,6 +13,15 @@ venv/
 # 数据库文件（运行时生成）
 *.db
 
+# 向量数据库（运行时生成）
+data/chroma_db/
+
+# 嵌入模型（本地缓存，约 400MB）
+data/models/
+
+# 日志文件（运行时生成）
+logs/
+
 # IDE
 .vscode/
 .idea/

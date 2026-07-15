@@ -25,3 +25,25 @@ python-dotenv>=1.0.0
 
 # 数据校验（请求/响应模型）
 pydantic>=2.0.0
+
+# ============================================================
+# 以下为企业级 RAG 知识问答新增依赖
+# ============================================================
+
+# 向量数据库（嵌入式模式，无需外部服务）
+chromadb>=0.5.0
+
+# LangChain ↔ ChromaDB 集成
+langchain-chroma>=0.2.0
+
+# 文本嵌入模型（中文优化，本地运行）
+sentence-transformers>=3.0.0
+
+# 密码哈希（bcrypt）
+passlib[bcrypt]>=1.7.4
+
+# JWT 令牌签发 / 验证
+python-jose[cryptography]>=3.3.0
+
+# API 限流（FastAPI 集成）
+slowapi>=0.1.9

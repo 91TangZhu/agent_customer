@@ -1,0 +1,202 @@
+"""
+RAG 管道模块：向量嵌入 + ChromaDB 存储 + 相似检索 + 知识库同步。
+
+面试知识点：
+- 为什么选 ChromaDB 而不是 FAISS/Pinecone？
+  ChromaDB 是嵌入式向量数据库（纯 Python，无需额外服务部署），支持元数据过滤，
+  适合中小规模（<100万条）本地部署场景。FAISS 是纯向量索引库不支持元数据过滤
+  和持久化；Pinecone/Milvus 是分布式向量数据库，适合大规模生产环境但需要独立部署。
+  本项目的服装知识库规模（几百到几千条文档）用 ChromaDB 嵌入式模式最合适。
+
+- 为什么选 text2vec-base-chinese 而不是 OpenAI Embeddings？
+  ① 本地运行零 API 成本  ② 中文优化（用中文语料训练）  ③ 数据不出服务器，隐私安全
+  缺点：需要下载约 400MB 模型文件，首次加载慢。对于纯中文场景，效果不输 OpenAI。
+
+- 为什么用单例模式加载 Embedding 模型？
+  模型加载是重量级操作（加载权重、构建词汇表），每次请求都重新 load 会导致
+  内存爆炸（多次加载模型副本）和响应延迟（每次加载 2-5 秒）。单例 + 懒加载是
+  机器学习模型在 Web 服务中的标准实践。
+"""
+import threading
+import os
+import ssl
+
+# （HuggingFace 镜像 + SSL 配置已移至 config/settings.py 最早阶段设置）
+
+from langchain_chroma import Chroma
+from langchain_huggingface import HuggingFaceEmbeddings
+from config.settings import settings
+from app.logger import get_logger
+
+rag_log = get_logger("rag")
+
+# 单例
+_embeddings: HuggingFaceEmbeddings | None = None
+_vectorstore: Chroma | None = None
+_write_lock = threading.Lock()  # ChromaDB SQLite 底层非线程安全写入保护
+
+
+def _get_embeddings() -> HuggingFaceEmbeddings:
+    """懒加载嵌入模型（单例）"""
+    global _embeddings
+    if _embeddings is None:
+        rag_log.info("加载嵌入模型: %s", settings.EMBEDDING_MODEL)
+        _embeddings = HuggingFaceEmbeddings(
+            model_name=settings.EMBEDDING_MODEL,
+            model_kwargs={"device": "cpu"},
+            encode_kwargs={"normalize_embeddings": True},
+        )
+        rag_log.info("嵌入模型加载完成")
+    return _embeddings
+
+
+def _get_vectorstore() -> Chroma:
+    """获取或创建 ChromaDB 向量存储（单例）"""
+    global _vectorstore
+    if _vectorstore is None:
+        os.makedirs(settings.CHROMA_DB_PATH, exist_ok=True)
+        embeddings = _get_embeddings()
+        _vectorstore = Chroma(
+            collection_name="clothing_knowledge",
+            embedding_function=embeddings,
+            persist_directory=settings.CHROMA_DB_PATH,
+        )
+        rag_log.info("ChromaDB 向量存储已初始化: %s", settings.CHROMA_DB_PATH)
+    return _vectorstore
+
+
+# ==================== 文档同步操作 ====================
+
+def add_document(doc_id: int, title: str, content: str, category: str) -> None:
+    """将文档嵌入后添加到 ChromaDB"""
+    with _write_lock:
+        vs = _get_vectorstore()
+        vs.add_texts(
+            texts=[content],
+            metadatas=[{
+                "doc_id": str(doc_id),
+                "title": title,
+                "category": category,
+            }],
+            ids=[f"doc_{doc_id}"],
+        )
+    rag_log.info("向量已添加: doc_id=%d title=%s category=%s", doc_id, title, category)
+
+
+def update_document(doc_id: int, title: str, content: str, category: str) -> None:
+    """更新文档：先删除旧向量，再添加新向量"""
+    with _write_lock:
+        vs = _get_vectorstore()
+        chroma_id = f"doc_{doc_id}"
+        # 删除旧向量（如果存在）
+        try:
+            vs.delete(ids=[chroma_id])
+        except Exception:
+            pass  # 首次添加时可能不存在
+        # 添加新向量
+        vs.add_texts(
+            texts=[content],
+            metadatas=[{
+                "doc_id": str(doc_id),
+                "title": title,
+                "category": category,
+            }],
+            ids=[chroma_id],
+        )
+    rag_log.info("向量已更新: doc_id=%d title=%s", doc_id, title)
+
+
+def delete_document(doc_id: int) -> None:
+    """从 ChromaDB 删除文档向量"""
+    with _write_lock:
+        vs = _get_vectorstore()
+        try:
+            vs.delete(ids=[f"doc_{doc_id}"])
+            rag_log.info("向量已删除: doc_id=%d", doc_id)
+        except Exception as e:
+            rag_log.warning("删除向量失败: doc_id=%d error=%s", doc_id, e)
+
+
+# ==================== 检索操作 ====================
+
+def search_similar(query: str, k: int | None = None, category: str | None = None) -> list[dict]:
+    """
+    向量相似检索。
+
+    参数:
+        query: 用户查询文本
+        k: 返回结果数（默认取配置）
+        category: 可选，按分类过滤（如 "尺码指南"）
+
+    返回:
+        [{doc_id, title, content, category, score}, ...]
+        score 为距离值，越小越相似（0 = 完全匹配）
+
+    面试知识点：
+    - similarity_search_with_score 返回 (Document, score) 元组
+    - score 取决于距离函数：ChromaDB 默认用 L2 距离或余弦距离
+      sentence-transformers 的 normalize_embeddings=True 会将向量归一化，
+      此时余弦相似度 = 1 - score（即 score 越小越相似）
+    - filter 参数利用 ChromaDB 的元数据过滤能力，在检索阶段直接
+      缩小候选集，比检索后再手动过滤效率高得多（减少无效计算）
+    """
+    import time
+    k = k or settings.VECTOR_SEARCH_K
+    vs = _get_vectorstore()
+
+    # 构建过滤条件
+    where_filter = None
+    if category:
+        where_filter = {"category": category}
+
+    start = time.perf_counter()
+    try:
+        results = vs.similarity_search_with_score(query, k=k, filter=where_filter)
+    except Exception as e:
+        rag_log.error("向量检索异常: %s", e)
+        return []
+
+    elapsed = round((time.perf_counter() - start) * 1000, 2)
+
+    docs = []
+    for doc, score in results:
+        docs.append({
+            "doc_id": int(doc.metadata.get("doc_id", 0)),
+            "title": doc.metadata.get("title", ""),
+            "content": doc.page_content,
+            "category": doc.metadata.get("category", ""),
+            "score": round(score, 4),
+        })
+
+    rag_log.info(
+        "向量检索: query='%s' category=%s k=%d → %d条结果 %.2fms",
+        query[:50], category or "全部", k, len(docs), elapsed,
+    )
+    return docs
+
+
+# ==================== 知识库初始化 ====================
+
+def seed_knowledge_base() -> int:
+    """
+    将种子数据写入 SQLite + ChromaDB（幂等：已有数据则跳过）。
+
+    返回写入的文档数量。
+    """
+    from app.database import create_document, get_all_documents
+    from app.kb_seed_data import DEFAULT_DOCUMENTS
+
+    # 检查是否已有数据
+    existing = get_all_documents()
+    if existing:
+        rag_log.info("知识库已有 %d 条文档，跳过种子初始化", len(existing))
+        return 0
+
+    count = 0
+    for doc in DEFAULT_DOCUMENTS:
+        doc_id = create_document(doc["title"], doc["content"], doc["category"])
+        add_document(doc_id, doc["title"], doc["content"], doc["category"])
+        count += 1
+
+    rag_log.info("知识库种子初始化完成: %d 条文档", count)
+    return count

@@ -2,7 +2,14 @@
 Agent 工具函数：每一个函数 = Agent 可以调用的一项能力。
 LangChain 会把函数名和文档字符串自动转成工具的 name + description，
 DeepSeek 会根据用户问题自动决定调用哪个工具。
+
+面试知识点：
+- ContextVar 是 Python 3.7+ 标准库提供的协程/线程安全变量存储机制，
+  每个异步任务有独立的上下文副本，互不干扰。
+  在 FastAPI 的 async/await 并发模型下，不能用全局变量或 threading.local
+  来存储请求级状态（多个请求共享同一线程），所以 ContextVar 是正确的选择。
 """
+import contextvars
 from app.database import (
     query_user_by_phone,
     query_user_by_id,
@@ -11,6 +18,23 @@ from app.database import (
     query_logistics_by_order_id,
 )
 
+# ContextVar：在每个异步请求上下文中独立存储 RAG 引用
+_rag_citations: contextvars.ContextVar[list[dict]] = contextvars.ContextVar(
+    "rag_citations", default=[]
+)
+
+
+def get_citations() -> list[dict]:
+    """获取当前请求上下文中收集的 RAG 引用（由 agent.py 在请求结束后调用）"""
+    return _rag_citations.get()
+
+
+def clear_citations() -> None:
+    """清空当前请求的引用缓存（每次新请求开始时调用）"""
+    _rag_citations.set([])
+
+
+# ==================== 原有工具 ====================
 
 def lookup_user_by_phone(phone: str) -> str:
     """根据手机号查询用户信息。当你需要查找某个手机号对应的用户时调用。"""
@@ -61,5 +85,99 @@ def lookup_logistics(order_id: int) -> str:
     )
 
 
-# 工具列表：Agent 初始化时注册这些工具
-TOOLS = [lookup_user_by_phone, lookup_orders_by_user_id, lookup_order_by_no, lookup_logistics]
+# ==================== RAG 新增工具 ====================
+
+def search_knowledge_base(query: str, category: str = "全部") -> str:
+    """
+    搜索服装知识库。当用户咨询服装相关问题（尺码、颜色搭配、面料洗涤保养、
+    产品信息、售后政策等）时，必须先调用此工具检索知识库，再基于检索结果回答。
+    参数 category 可选值：尺码指南、颜色搭配、洗涤保养、产品信息、售后政策。
+    """
+    from app.rag import search_similar
+
+    cat = None if category in ("全部", "所有", "") else category
+    results = search_similar(query, category=cat)
+
+    if not results:
+        return "知识库中暂无与您问题直接相关的信息。请尝试换个方式提问，或联系人工客服。"
+
+    # 格式化检索结果
+    lines = [f"知识库检索结果（共{len(results)}条）："]
+    for i, r in enumerate(results, 1):
+        lines.append(
+            f"{i}. [{r['category']}] {r['title']}\n"
+            f"   {r['content'][:300]}"
+        )
+
+    # 将检索结果存入 ContextVar，供 agent.py 构建 citations
+    citations = _rag_citations.get()
+    citations.extend([
+        {
+            "title": r["title"],
+            "snippet": r["content"][:150] + ("..." if len(r["content"]) > 150 else ""),
+            "category": r["category"],
+        }
+        for r in results
+    ])
+    _rag_citations.set(citations)
+
+    return "\n".join(lines)
+
+
+def recommend_size(height: float, weight: float, gender: str = "男", clothing_type: str = "上衣") -> str:
+    """
+    根据用户的身高(cm)、体重(kg)、性别、服装类型推荐尺码。
+    当用户提供身高体重并询问尺码时，调用此工具获取推荐。
+    内部会搜索知识库中的尺码指南进行匹配。
+    """
+    from app.rag import search_similar
+
+    # 构建针对性的检索查询
+    search_query = f"{clothing_type} 尺码 {gender} 身高{int(height)} 体重{int(weight)}"
+    results = search_similar(search_query, category="尺码指南")
+
+    if not results:
+        return (
+            f"根据您提供的信息（{gender}性，身高{int(height)}cm，体重{int(weight)}kg），"
+            f"未能从知识库中匹配到精确的{clothing_type}尺码数据。"
+            f"建议您参考以下通用建议：\n"
+            f"- 身高{int(height)}cm 体重{int(weight)}kg 的{gender}性通常适合"
+            f"{'M-L码' if weight >= 60 else 'S-M码'}范围\n"
+            f"- 建议结合胸围/腰围实际测量数据选择\n"
+            f"- 可联系人工客服获取一对一尺码指导"
+        )
+
+    # 存储引用
+    citations = _rag_citations.get()
+    citations.extend([
+        {
+            "title": r["title"],
+            "snippet": r["content"][:150] + ("..." if len(r["content"]) > 150 else ""),
+            "category": r["category"],
+        }
+        for r in results
+    ])
+    _rag_citations.set(citations)
+
+    # 格式化推荐结果
+    lines = [
+        f"根据您提供的信息（{gender}性，身高{int(height)}cm，体重{int(weight)}kg），"
+        f"为您检索到以下{clothing_type}尺码参考：\n"
+    ]
+    for i, r in enumerate(results, 1):
+        lines.append(f"参考{i}：[{r['category']}] {r['title']}\n{r['content']}\n")
+    lines.append("请结合您的实际体型（如偏瘦/偏胖）和个人喜好（修身/宽松）微调。如有疑问欢迎继续咨询！")
+
+    return "\n".join(lines)
+
+
+# ==================== 工具列表 ====================
+# Agent 初始化时注册这些工具
+TOOLS = [
+    lookup_user_by_phone,
+    lookup_orders_by_user_id,
+    lookup_order_by_no,
+    lookup_logistics,
+    search_knowledge_base,
+    recommend_size,
+]

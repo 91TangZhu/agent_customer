@@ -7,8 +7,8 @@
 
 ## 当前状态
 
-- **版本**: v0.1.0
-- **最后更新**: 2026-07-15 09:33
+- **版本**: v0.2.0
+- **最后更新**: 2026-07-15
 - **进行中**: 无
 - **待办**: 见下方「待办事项」
 
@@ -99,14 +99,54 @@
 
 ---
 
+### [2026-07-15] 功能开发: 企业级 RAG 知识问答系统
+- **类型**: 功能开发 + 基础设施
+- **问题**: v0.1.0 仅支持查订单/物流等事务操作，缺乏知识问答能力；缺少用户认证、会话管理、知识库后台、限流/日志等企业级基础设施
+- **概述**:
+  - RAG 知识问答管道（ChromaDB + text2vec-base-chinese + 19 条服装知识种子）
+  - 用户认证系统（JWT + bcrypt + FastAPI 依赖注入）
+  - 会话管理（chat_sessions / chat_messages，多轮对话历史存储）
+  - 知识库管理后台（CRUD API + HTML 管理页面）
+  - 全局基础设施（结构化日志 + 异常捕获 + API 限流 + 请求计时）
+  - Agent 增强（RAG 增强系统提示词 + tenacity 重试 + ContextVar 引用收集）
+  - 新增 Agent 工具：search_knowledge_base（向量检索）+ recommend_size（尺码推荐）
+  - 前端重构为多页面（登录页 / 聊天页 / 管理后台）
+- **新增文件**:
+  - `app/logger.py` — 结构化日志（api/rag/llm/auth 四通道）
+  - `app/middleware.py` — 全局异常捕获 + 请求计时 + slowapi 限流
+  - `app/auth.py` — JWT 令牌 + bcrypt 密码 + FastAPI 依赖注入
+  - `app/rag.py` — ChromaDB 向量存储 + 嵌入 + 相似检索 + 知识库同步
+  - `app/kb_seed_data.py` — 19 条服装知识库种子数据
+- **修改文件**:
+  - `app/main.py` — 3 → 15 个 API 端点 + 多页面 HTML 前端
+  - `app/agent.py` — RAG 增强提示词 + tenacity 重试 + ContextVar 引用收集
+  - `app/tools.py` — 新增 search_knowledge_base + recommend_size 工具
+  - `app/models.py` — 新增 16 个 Pydantic 模型（auth/session/kb/citation）
+  - `app/database.py` — 3 → 7 张表完整 CRUD（新增 auth_users/documents/chat_sessions/chat_messages）
+  - `config/settings.py` — 新增 JWT/RAG/限流配置 + HuggingFace 国内镜像
+  - `db_init.py` — 全量表创建 + admin/testuser 种子账号
+  - `requirements.txt` — 新增 7 个依赖（chromadb/langchain-chroma/sentence-transformers/passlib[bcrypt]/python-jose[cryptography]/slowapi/langchain-huggingface）
+  - `.env.example` — 新增 JWT/RAG/限流环境变量模板
+  - `.gitignore` — 新增 chroma_db/ models/ logs/ 排除规则
+- **数据库**: 3 → 7 张表（新增 auth_users / documents / chat_sessions / chat_messages）
+- **API 端点**: 3 → 15 个（/auth/* 认证 / /sessions/* 会话 / /admin/kb/* 知识库管理 / /chat 增强）
+- **验证**:
+  - 数据库初始化成功（7 张表 + 种子数据）
+  - RAG 管道正常运行（19 文档嵌入 + 检索约 50ms）
+  - 认证流程完整（注册 → 登录 → JWT 签发 → 权限校验）
+  - 端到端对话验证通过（RAG 尺码推荐 + 引用展示）
+  - 服务正常启动: http://localhost:8000
+
+---
+
 ## 待办事项
 
 | 优先级 | 内容 | 状态 |
 |--------|------|------|
-| P1 | 多轮对话上下文记忆 | 待开发 |
-| P1 | 聊天页面历史记录保存 | 待开发 |
+| P1 | ~~多轮对话上下文记忆~~ | 已完成（chat_sessions 实现） |
+| P1 | ~~聊天页面历史记录保存~~ | 已完成 |
 | P2 | 增加"退换货处理"工具 | 待开发 |
-| P2 | 用户认证（登录后只能查自己订单） | 待开发 |
+| P2 | ~~用户认证（登录后只能查自己订单）~~ | 已完成（JWT + bcrypt） |
 | P3 | 部署到服务器/云平台 | 待规划 |
 | P3 | 对接企业微信/飞书等 IM | 待规划 |
 
