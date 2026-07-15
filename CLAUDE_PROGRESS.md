@@ -157,6 +157,22 @@
 
 ---
 
+### [2026-07-15] 文档: README 全面重写至 v0.2.0，配套同步机制
+- **类型**: 文档
+- **问题**: README.md 停留在 v0.1.0 水平（仅基础 Agent + SQLite 描述），缺少 RAG/认证/15 个 API 端点/完整项目结构/对话示例/环境变量等关键信息，与当前 v0.2.0 企业级功能严重不匹配
+- **概述**:
+  - README.md 全面重写：标题改为「服装电商智能客服 Agent」，新增完整技术栈表格（含 RAG/JWT/ChromaDB）、详细启动流程（6 步，涵盖嵌入模型下载和知识库初始化）、测试账号、核心功能清单、15 个 API 端点表、完整项目结构树、对话示例、环境变量说明
+  - git-push Skill 新增「同步 README」步骤：推送后自动对比 PROJECT_SUMMARY.md 校验 README 一致性并自动更新提交
+  - record-keeper Agent 第二步新增 README 同步子步骤，确保文档三件套（README + PROJECT_SUMMARY + CLAUDE_PROGRESS）保持同步
+- **影响文件**:
+  - `README.md` — 全面重写（86 → 167 行，新增 6 个章节）
+  - `.claude/skills/git-push/SKILL.md` — 新增 README 同步步骤（Step 2）
+  - `.claude/agents/record-keeper.md` — 新增 README 同步子步骤（Step 2.3）
+- **方案**: 以 README 为对外门面、PROJECT_SUMMARY 为内部档案、CLAUDE_PROGRESS 为变更日志，三者通过 Agent/Skill 机制自动保持一致性
+- **验证**: README 内容与 PROJECT_SUMMARY.md 核心指标一致（版本/技术栈/结构/端点），git-push Skill 包含 README 校验逻辑，record-keeper Agent 流程覆盖三份文档
+
+---
+
 ## 待办事项
 
 | 优先级 | 内容 | 状态 |

@@ -18,7 +18,17 @@ allowed-tools: Bash(git add:*), Bash(git status:*), Bash(git commit:*), Bash(git
    ```
 5. 报告结果
 
-## 2. 同步仓库描述（推送成功后）
+## 2. 同步 README（推送成功后）
+检查 README.md 是否与 PROJECT_SUMMARY.md 保持一致：
+- 如果 README 的版本号、技术栈、功能列表、项目结构、API 端点等与 PROJECT_SUMMARY.md 不一致，**自动更新 README.md**
+- 更新 README 后，将其加入暂存区并单独提交：
+  ```bash
+  git add README.md
+  git commit -m "docs: 同步 README.md 至最新版本"
+  git push
+  ```
+
+## 3. 同步仓库描述（推送成功后）
 推送成功后，自动用 `GITHUB_TOKEN`（从 `.env` 读取）更新远端仓库的 description，内容根据 PROJECT_SUMMARY.md 的项目定位自动生成。
 
 ```python
