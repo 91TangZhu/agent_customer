@@ -50,6 +50,7 @@
 | `VECTOR_SEARCH_K` | 向量检索返回数量 | `3` |
 | `RATE_LIMIT_CHAT_PER_USER` | /chat 每用户限流 | `30/minute` |
 | `RATE_LIMIT_CHAT_PER_IP` | /chat 每 IP 限流 | `60/minute` |
+| `GITHUB_TOKEN` | GitHub API Token（更新仓库描述等） | `ghp_xxx...` |
 
 > 模板文件: `.env.example`  |  密钥获取: https://platform.deepseek.com
 
@@ -166,7 +167,7 @@ uvicorn app.main:app --reload
 
 | Skill | 用途 | 调用方式 |
 |-------|------|----------|
-| `git-push` | 一键 add → commit → push | `/git-push` |
+| `git-push` | 一键推送 + 同步远程仓库描述 | `/git-push` |
 | `project-init` | 新会话启动，读取记忆恢复上下文 | `/project-init` |
 | `project-update` | 完成修改后更新记忆文档 | `/project-update` |
 

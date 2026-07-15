@@ -139,6 +139,24 @@
 
 ---
 
+### [2026-07-15] 基础设施: 优化 record-keeper Agent 与 git-push Skill，集成远程仓库描述同步
+- **类型**: 基础设施
+- **问题**: record-keeper Agent 工作流程繁琐（分步确认），缺少项目上下文，git-push Skill 功能单一
+- **概述**:
+  - record-keeper Agent 新增项目背景章节（版本/仓库/技术栈/数据库等），减少上下文切换
+  - 合并确认步骤（第一步汇总后一次 AskUserQuestion 搞定）
+  - record-keeper 和 git-push 集成 GitHub API 自动同步远程仓库描述功能
+  - .env / .env.example 新增 GITHUB_TOKEN 配置
+- **影响文件**:
+  - `.claude/agents/record-keeper.md` — 新增项目上下文 + 合并确认步骤 + 集成远程描述同步
+  - `.claude/skills/git-push/SKILL.md` — 新增仓库描述自动同步功能
+  - `.env.example` — 新增 GITHUB_TOKEN 配置
+  - `.env` — 本地添加 GITHUB_TOKEN（不入 Git）
+- **方案**: 利用 GitHub REST API (PATCH /repos/{owner}/{repo}) 自动同步项目定位描述，减少手动维护
+- **验证**: record-keeper Agent 可独立完成归档推送流程，推送后自动更新仓库描述
+
+---
+
 ## 待办事项
 
 | 优先级 | 内容 | 状态 |
