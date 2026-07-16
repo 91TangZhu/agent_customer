@@ -186,6 +186,24 @@ def search_similar(query: str, k: int | None = None, category: str | None = None
             rag_log.error("向量检索异常: %s", e)
             return []
 
+    # 如果 gender 过滤返回空结果，降级去除 gender 过滤后重试
+    # （旧 ChromaDB 数据可能没有 gender 元数据字段，导致过滤条件匹配不到任何文档）
+    if len(results) == 0 and gender and where_filter:
+        fallback_filter = None
+        single_condition = None
+        if category:
+            single_condition = {"category": category}
+        if where_filter != single_condition:  # 确实有 gender 过滤在起作用
+            rag_log.warning(
+                "gender 过滤返回空结果，降级去除 gender 重试: gender=%s category=%s",
+                gender, category or "全部",
+            )
+            fallback_filter = single_condition
+            try:
+                results = vs.similarity_search_with_score(query, k=k, filter=fallback_filter)
+            except Exception as e2:
+                rag_log.error("降级检索异常: %s", e2)
+
     elapsed = round((time.perf_counter() - start) * 1000, 2)
 
     docs = []
@@ -231,4 +249,56 @@ def seed_knowledge_base() -> int:
         count += 1
 
     rag_log.info("知识库种子初始化完成: %d 条文档", count)
+    return count
+
+
+def reindex_knowledge_base() -> int:
+    """
+    从 SQLite 重建整个 ChromaDB 向量索引（保留 SQLite 数据不变）。
+
+    用途：
+    - 修复旧向量缺失 gender 等新增元数据字段的问题
+    - 向量损坏或数据不一致时的修复工具
+
+    返回重建的文档数量。
+    """
+    global _vectorstore
+    from app.database import get_all_documents
+
+    docs = get_all_documents()
+    if not docs:
+        rag_log.info("SQLite 中无文档，跳过重建")
+        return 0
+
+    with _write_lock:
+        vs = _get_vectorstore()
+        # 获取所有已有向量 ID 并删除
+        try:
+            existing_ids = vs.get()["ids"]
+            if existing_ids:
+                vs.delete(ids=existing_ids)
+                rag_log.info("已删除 %d 条旧向量", len(existing_ids))
+        except Exception as e:
+            rag_log.warning("删除旧向量时出错（可能本来为空）: %s", e)
+
+        # 从 SQLite 重新索引所有文档
+        count = 0
+        for doc in docs:
+            gender = doc.get("gender", "通用")
+            vs.add_texts(
+                texts=[doc["content"]],
+                metadatas=[{
+                    "doc_id": str(doc["id"]),
+                    "title": doc["title"],
+                    "category": doc["category"],
+                    "gender": gender,
+                }],
+                ids=[f"doc_{doc['id']}"],
+            )
+            count += 1
+
+        # 重置单例，确保下次检索从磁盘读取最新数据
+        _vectorstore = None
+
+    rag_log.info("向量索引重建完成: %d 条文档", count)
     return count

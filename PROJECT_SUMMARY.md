@@ -74,7 +74,7 @@
 agent_customer/
 ├── app/                        # 应用核心代码
 │   ├── __init__.py
-│   ├── main.py                 # FastAPI 入口 + 多页面 HTML + 15 个 API
+│   ├── main.py                 # FastAPI 入口 + 多页面 HTML + 17 个 API
 │   ├── agent.py                # LangChain ReAct Agent (RAG 增强 + 重试)
 │   ├── tools.py                # 6 个 Agent 工具函数 (含 RAG)
 │   ├── models.py               # Pydantic 请求/响应模型 (19 个类)
@@ -82,7 +82,7 @@ agent_customer/
 │   ├── auth.py                 # JWT + bcrypt 认证 + 依赖注入
 │   ├── logger.py               # 结构化日志 (api/rag/llm/auth)
 │   ├── middleware.py           # 全局异常 + 请求计时 + 限流
-│   ├── rag.py                  # ChromaDB 向量存储 + 嵌入 + 检索
+│   ├── rag.py                  # ChromaDB 向量存储 + 嵌入 + 检索 + 索引重建
 │   └── kb_seed_data.py         # 19 条服装知识库种子数据
 ├── config/
 │   ├── __init__.py

@@ -38,6 +38,20 @@ setup_middleware(app)
 async def startup():
     from app.database import migrate_database
     migrate_database()
+    # 自动修复：如果 ChromaDB 向量缺失 gender 元数据，自动重建索引
+    try:
+        from app.rag import _get_vectorstore, reindex_knowledge_base
+        vs = _get_vectorstore()
+        existing = vs.get()
+        if existing["ids"]:
+            # 抽样检查第一条文档是否有 gender 字段
+            sample_meta = existing["metadatas"][0] if existing["metadatas"] else {}
+            if "gender" not in sample_meta:
+                app_log.warning("检测到 ChromaDB 向量缺失 gender 字段，自动重建索引...")
+                reindexed = reindex_knowledge_base()
+                app_log.info("自动重建完成: %d 条文档已重新索引", reindexed)
+    except Exception as e:
+        app_log.warning("向量索引检查/重建出错（不影响正常使用）: %s", e)
     app_log.info("服装电商智能客服 v0.2.1 启动")
 
 
@@ -231,6 +245,14 @@ async def admin_init_kb(user: dict = Depends(require_admin)):
     from app.rag import seed_knowledge_base
     count = seed_knowledge_base()
     return {"message": "知识库初始化完成" if count else "知识库已有数据，跳过初始化", "count": count}
+
+
+@app.post("/admin/kb/reindex")
+async def admin_reindex_kb(user: dict = Depends(require_admin)):
+    """管理员：从 SQLite 重建整个 ChromaDB 向量索引"""
+    from app.rag import reindex_knowledge_base
+    count = reindex_knowledge_base()
+    return {"message": f"向量索引重建完成，共 {count} 条文档", "count": count}
 
 
 @app.get("/admin/kb/categories")

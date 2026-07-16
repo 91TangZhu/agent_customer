@@ -100,18 +100,20 @@ uvicorn app.main:app --reload
 | PUT | `/admin/kb/documents/{id}` | 更新文档 | 管理员 |
 | DELETE | `/admin/kb/documents/{id}` | 删除文档 | 管理员 |
 | POST | `/admin/kb/init` | 初始化知识库 | 管理员 |
+| POST | `/admin/kb/reindex` | 重建向量索引 | 管理员 |
+| GET | `/admin/kb/categories` | 文档分类列表 | 管理员 |
 
 ## 项目结构
 ```
 agent_customer/
 ├── app/
-│   ├── main.py            # FastAPI 入口 + 15 个 API 端点 + 多页面 HTML
+│   ├── main.py            # FastAPI 入口 + 17 个 API 端点 + 多页面 HTML
 │   ├── agent.py           # RAG 增强 Agent（系统提示词 + LLM 重试）
 │   ├── tools.py            # 6 个 Agent 工具（含 search_knowledge_base）
 │   ├── models.py           # 20+ Pydantic 模型
 │   ├── database.py         # SQLite 查询封装（7 张表完整 CRUD）
 │   ├── auth.py             # JWT 签发/验证 + bcrypt 密码哈希
-│   ├── rag.py              # ChromaDB 向量存储 + 嵌入 + 检索 + KB 同步
+│   ├── rag.py              # ChromaDB 向量存储 + 嵌入 + 检索 + KB 同步 + 索引重建
 │   ├── logger.py           # 结构化日志（api/rag/llm/auth）
 │   ├── middleware.py        # 全局异常捕获 + 请求计时 + 限流
 │   └── kb_seed_data.py     # 19 条服装知识库种子数据
