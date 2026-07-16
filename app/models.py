@@ -129,3 +129,44 @@ class DocumentListResponse(BaseModel):
     total: int
     page: int
     items: list[DocumentResponse]
+
+
+class BatchDeleteRequest(BaseModel):
+    """批量删除文档请求"""
+    ids: list[int] = Field(..., min_length=1, max_length=200)
+
+
+# ==================== 管理后台 ====================
+
+class AdminUserItem(BaseModel):
+    """管理后台用户列表项"""
+    id: int
+    username: str
+    phone: str | None = None
+    is_admin: bool
+    created_at: str
+
+
+class AdminOrderItem(BaseModel):
+    """管理后台订单列表项（含用户名和手机号）"""
+    id: int
+    order_no: str
+    product_name: str
+    amount: float
+    status: str
+    created_at: str
+    username: str
+    phone: str | None = None
+
+
+class AdminOrderDetail(BaseModel):
+    """管理后台订单详情（含用户名和手机号）"""
+    id: int
+    user_id: int
+    order_no: str
+    product_name: str
+    amount: float
+    status: str
+    created_at: str
+    username: str
+    phone: str | None = None

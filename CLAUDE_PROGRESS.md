@@ -7,7 +7,7 @@
 
 ## 当前状态
 
-- **版本**: v0.2.1
+- **版本**: v0.3.0
 - **最后更新**: 2026-07-16
 - **进行中**: 无
 - **待办**: 见下方「待办事项」
@@ -223,6 +223,26 @@
   - 修改: `app/rag.py`, `app/main.py`
 - **方案**: 三重保障——检索时空结果自动降级（用户无感知）+ 启动时自动修复（一劳永逸）+ 管理后台手动重建（兜底手段），确保 gender 过滤升级后旧向量平滑过渡
 - **验证**: gender 过滤空结果时自动降级返回正确文档；启动后自动检测缺失字段并重建索引；管理后台可手动触发重建
+
+---
+
+### [2026-07-16] 重构: 种子数据服装电商化 + users/auth_users 表合并 + 管理后台扩展
+- **类型**: 重构 + 功能开发
+- **问题**: (1) users（业务客户）和 auth_users（登录认证）两张独立表造成数据冗余与维护困难，订单查询需跨表关联 (2) 种子订单为 Apple 电子产品，与服装电商定位不符 (3) 业务用户表含 email 字段但实际业务仅用手机号 (4) 知识库缺少具体服装 SKU 参数文档 (5) 管理后台缺少用户管理和订单管理功能
+- **概述**:
+  - `users` 和 `auth_users` 合并为统一 `users` 表：id, username, password_hash, phone, is_admin, created_at；6 个用户种子数据 (admin/testuser/lihua/wangfang/zhangwei/chenjing)
+  - 所有 FK (orders.user_id, chat_sessions.user_id, chat_messages.user_id) 指向新统一 users 表
+  - 订单种子数据从 Apple 电子产品替换为 8 条服装商品（羊毛大衣/纯棉T恤/真丝连衣裙/莫代尔打底衫/西裤/牛仔小脚裤/防晒外套/天丝亚麻阔腿裤）
+  - 去 email 字段，工具层 + API 层统一返回 username + phone
+  - ORDER JOIN 查询自动返回 username + phone（规范化设计，订单表不冗余存用户信息）
+  - 知识库「产品信息」分类新增 8 篇具体服装 SKU 文档（SKU 格式/面料成分/尺码范围/价格区间/颜色选项/洗涤保养）
+  - 管理后台从单标签扩展为三标签：用户管理 / 订单管理 / 文档管理（动态 tab 切换 + 顶部标题自适应）
+  - 新增 3 个 API：`GET /admin/users`、`GET /admin/orders`、`GET /admin/orders/{order_id}`
+  - `migrate_database()` 改为检测旧 schema (auth_users 表或 users.name 列) → 自动删库 + 删 ChromaDB + 重建
+- **影响文件**:
+  - 修改: `db_init.py`, `app/database.py`, `app/models.py`, `app/tools.py`, `app/main.py`, `app/kb_seed_data.py`, `app/agent.py`
+- **方案**: 统一用户表消除冗余，规范化设计（订单不冗余用户信息，通过 JOIN 获取），旧 schema 自动迁移采用激进策略（删库重建，因为此时无生产数据），管理后台遵循 FastAPI 路由顺序规则（`/admin/orders` 在 `/{order_id}` 之前声明）
+- **验证**: db_init.py 成功创建 6 表 + 6 用户 + 8 订单 + 5 物流；`/admin/users` 返回 6 用户（有 phone 无 email）；`/admin/orders` 返回 8 服装订单（JOIN 含 username+phone）；客服对话查用户/订单均正确展示服装业务数据；前端三标签切换 + JS 函数全部就位
 
 ---
 

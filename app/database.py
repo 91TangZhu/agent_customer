@@ -16,7 +16,7 @@ def get_connection() -> sqlite3.Connection:
     return conn
 
 
-# ==================== 用户查询（原有）====================
+# ==================== 用户查询 ====================
 
 def query_user_by_phone(phone: str) -> dict | None:
     """根据手机号查询用户"""
@@ -34,27 +34,38 @@ def query_user_by_id(user_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-# ==================== 订单查询（原有）====================
+# ==================== 订单查询 ====================
 
 def query_orders_by_user_id(user_id: int) -> list[dict]:
-    """根据用户ID查所有订单"""
+    """根据用户ID查所有订单（含用户名和手机号）"""
     conn = get_connection()
     rows = conn.execute(
-        "SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC", (user_id,)
+        """SELECT o.*, u.username, u.phone
+           FROM orders o
+           JOIN users u ON o.user_id = u.id
+           WHERE o.user_id = ?
+           ORDER BY o.created_at DESC""",
+        (user_id,),
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
 
 def query_order_by_no(order_no: str) -> dict | None:
-    """根据订单号精确查询"""
+    """根据订单号精确查询（含用户名和手机号）"""
     conn = get_connection()
-    row = conn.execute("SELECT * FROM orders WHERE order_no = ?", (order_no,)).fetchone()
+    row = conn.execute(
+        """SELECT o.*, u.username, u.phone
+           FROM orders o
+           JOIN users u ON o.user_id = u.id
+           WHERE o.order_no = ?""",
+        (order_no,),
+    ).fetchone()
     conn.close()
     return dict(row) if row else None
 
 
-# ==================== 物流查询（原有）====================
+# ==================== 物流查询 ====================
 
 def query_logistics_by_order_id(order_id: int) -> dict | None:
     """根据订单ID查物流信息"""
@@ -64,15 +75,15 @@ def query_logistics_by_order_id(order_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-# ==================== 认证用户管理（新增）====================
+# ==================== 用户管理（统一 users 表）====================
 
-def create_auth_user(username: str, password_hash: str, is_admin: int = 0) -> int:
-    """创建认证用户，返回新用户 ID"""
+def create_user(username: str, password_hash: str, phone: str | None = None, is_admin: int = 0) -> int:
+    """创建用户，返回新用户 ID"""
     from datetime import datetime
     conn = get_connection()
     cur = conn.execute(
-        "INSERT INTO auth_users (username, password_hash, is_admin, created_at) VALUES (?, ?, ?, ?)",
-        (username, password_hash, is_admin, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        "INSERT INTO users (username, password_hash, phone, is_admin, created_at) VALUES (?, ?, ?, ?, ?)",
+        (username, password_hash, phone, is_admin, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
     )
     user_id = cur.lastrowid
     conn.commit()
@@ -80,18 +91,18 @@ def create_auth_user(username: str, password_hash: str, is_admin: int = 0) -> in
     return user_id
 
 
-def get_auth_user_by_username(username: str) -> dict | None:
-    """根据用户名查询认证用户"""
+def get_user_by_username(username: str) -> dict | None:
+    """根据用户名查询用户"""
     conn = get_connection()
-    row = conn.execute("SELECT * FROM auth_users WHERE username = ?", (username,)).fetchone()
+    row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
     conn.close()
     return dict(row) if row else None
 
 
-def get_auth_user_by_id(user_id: int) -> dict | None:
-    """根据用户 ID 查询认证用户"""
+def get_user_by_id(user_id: int) -> dict | None:
+    """根据用户 ID 查询用户"""
     conn = get_connection()
-    row = conn.execute("SELECT * FROM auth_users WHERE id = ?", (user_id,)).fetchone()
+    row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
     conn.close()
     return dict(row) if row else None
 
@@ -99,12 +110,52 @@ def get_auth_user_by_id(user_id: int) -> dict | None:
 def update_password(user_id: int, new_hash: str) -> None:
     """更新用户密码哈希"""
     conn = get_connection()
-    conn.execute("UPDATE auth_users SET password_hash = ? WHERE id = ?", (new_hash, user_id))
+    conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (new_hash, user_id))
     conn.commit()
     conn.close()
 
 
-# ==================== 知识库文档管理（新增）====================
+# ==================== 管理后台查询 ====================
+
+def list_all_users() -> list[dict]:
+    """获取所有用户列表（管理后台用）"""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT id, username, phone, is_admin, created_at FROM users ORDER BY id"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def list_all_orders() -> list[dict]:
+    """获取所有订单列表，含用户名和手机号（管理后台用）"""
+    conn = get_connection()
+    rows = conn.execute(
+        """SELECT o.id, o.order_no, o.product_name, o.amount, o.status, o.created_at,
+                  u.username, u.phone
+           FROM orders o
+           JOIN users u ON o.user_id = u.id
+           ORDER BY o.created_at DESC"""
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_order_by_id(order_id: int) -> dict | None:
+    """获取单个订单详情，含用户名和手机号"""
+    conn = get_connection()
+    row = conn.execute(
+        """SELECT o.*, u.username, u.phone
+           FROM orders o
+           JOIN users u ON o.user_id = u.id
+           WHERE o.id = ?""",
+        (order_id,),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+# ==================== 知识库文档管理 ====================
 
 def create_document(title: str, content: str, category: str, gender: str = "通用") -> int:
     """创建知识库文档，返回文档 ID"""
@@ -203,7 +254,7 @@ def get_categories() -> list[str]:
     return [r["category"] for r in rows]
 
 
-# ==================== 会话管理（新增）====================
+# ==================== 会话管理 ====================
 
 def create_session(user_id: int, title: str = "新对话") -> int:
     """创建会话，返回会话 ID"""
@@ -305,23 +356,52 @@ def save_message(session_id: int, user_id: int, role: str, content: str, citatio
 
 def migrate_database() -> None:
     """
-    自动迁移：为旧数据库添加新增字段，避免手动重建。
-    每次新增列时在此追加 ALTER TABLE 语句，幂等执行（列已存在则跳过）。
+    检测旧 schema 并自动重建数据库。
+    如果检测到旧版结构（auth_users 表存在或 users 表有 name 列），
+    则删除旧数据库和 ChromaDB，重新初始化。
     """
     conn = get_connection()
-    migrations = [
-        # v0.2.1: documents 表新增 gender 列
-        "ALTER TABLE documents ADD COLUMN gender TEXT NOT NULL DEFAULT '通用'",
-    ]
-    for sql in migrations:
+    needs_rebuild = False
+
+    try:
+        # 检测旧 schema 标志：auth_users 表存在
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='auth_users'"
+        ).fetchone()
+        if row:
+            needs_rebuild = True
+    except Exception:
+        pass
+
+    if not needs_rebuild:
         try:
-            conn.execute(sql)
-            conn.commit()
-            print(f"[MIGRATE] 已执行: {sql[:60]}...")
-        except sqlite3.OperationalError as e:
-            # 列已存在则跳过
-            if "duplicate column" in str(e).lower() or "already exists" in str(e).lower():
-                pass
-            else:
-                raise
+            # 检测旧 schema 标志：users 表有 name 列
+            cols = conn.execute("PRAGMA table_info(users)").fetchall()
+            col_names = [c[1] for c in cols]
+            if "name" in col_names:
+                needs_rebuild = True
+        except Exception:
+            pass  # 表可能还不存在
+
     conn.close()
+
+    if needs_rebuild:
+        import shutil
+        from config.settings import settings
+
+        print("[MIGRATE] 检测到旧版数据库 schema，开始重建...")
+
+        db_path = settings.DATABASE_PATH
+        chroma_path = settings.CHROMA_DB_PATH
+
+        if os.path.exists(db_path):
+            os.remove(db_path)
+            print(f"[MIGRATE] 已删除旧数据库: {db_path}")
+        if os.path.exists(chroma_path):
+            shutil.rmtree(chroma_path)
+            print(f"[MIGRATE] 已删除旧 ChromaDB: {chroma_path}")
+
+        # 延迟导入避免循环依赖
+        from db_init import init_db
+        init_db()
+        print("[MIGRATE] 数据库重建完成")

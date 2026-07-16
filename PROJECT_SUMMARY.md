@@ -1,6 +1,6 @@
 # 项目概览
 
-> 最后更新: 2026-07-16 | 版本: v0.2.1 | 状态: 🟢 开发中
+> 最后更新: 2026-07-16 | 版本: v0.3.0 | 状态: 🟢 开发中
 
 ---
 
@@ -74,16 +74,16 @@
 agent_customer/
 ├── app/                        # 应用核心代码
 │   ├── __init__.py
-│   ├── main.py                 # FastAPI 入口 + 多页面 HTML + 17 个 API
+│   ├── main.py                 # FastAPI 入口 + 多页面 HTML + 20 个 API
 │   ├── agent.py                # LangChain ReAct Agent (RAG 增强 + 重试)
 │   ├── tools.py                # 6 个 Agent 工具函数 (含 RAG)
-│   ├── models.py               # Pydantic 请求/响应模型 (19 个类)
-│   ├── database.py             # SQLite 查询封装 (7 张表 CRUD)
+│   ├── models.py               # Pydantic 请求/响应模型 (22 个类)
+│   ├── database.py             # SQLite 查询封装 (6 张表 CRUD + JOIN 查询)
 │   ├── auth.py                 # JWT + bcrypt 认证 + 依赖注入
 │   ├── logger.py               # 结构化日志 (api/rag/llm/auth)
 │   ├── middleware.py           # 全局异常 + 请求计时 + 限流
 │   ├── rag.py                  # ChromaDB 向量存储 + 嵌入 + 检索 + 索引重建
-│   └── kb_seed_data.py         # 19 条服装知识库种子数据
+│   └── kb_seed_data.py         # 27 条服装知识库种子数据 (含 8 篇 SKU)
 ├── config/
 │   ├── __init__.py
 │   └── settings.py             # .env → Python 配置单例 (含 JWT/RAG)
@@ -107,7 +107,7 @@ agent_customer/
 ├── .env.example                # 配置模板
 ├── .gitignore
 ├── requirements.txt            # pip 依赖清单 (17 个包)
-├── db_init.py                  # 数据库初始化脚本 (7 张表)
+├── db_init.py                  # 数据库初始化脚本 (6 张表 + 服装种子数据)
 ├── README.md                   # 项目说明
 ├── PROJECT_SUMMARY.md          # 本文件 — 项目档案
 ├── CLAUDE_PROGRESS.md          # 开发进度追踪
@@ -121,30 +121,31 @@ agent_customer/
 
 | 表名 | 字段 | 测试数据 |
 |------|------|----------|
-| `users` | id, name, phone, email, created_at | 5 条 |
-| `orders` | id, user_id(FK), order_no, product_name, amount, status, created_at | 8 条 |
+| `users` | id, username(UNIQUE), password_hash, phone, is_admin, created_at | 6 条 (admin/testuser/lihua/wangfang/zhangwei/chenjing) |
+| `orders` | id, user_id(FK→users), order_no, product_name, amount, status, created_at | 8 条 (服装商品) |
 | `logistics` | id, order_id(FK), tracking_no, carrier, status, updates, created_at | 5 条 |
-| `auth_users` | id, username(UNIQUE), password_hash, role, created_at | 2 条 (admin/testuser) |
-| `documents` | id, title, content, category, gender, created_at, updated_at | 19 条 (种子数据) |
-| `chat_sessions` | id, user_id(FK), title, created_at | 按需创建 |
+| `documents` | id, title, content, category, gender, created_at, updated_at | 27 条 (种子数据) |
+| `chat_sessions` | id, user_id(FK→users), title, created_at | 按需创建 |
 | `chat_messages` | id, session_id(FK), role, content, citations(JSON), created_at | 按需创建 |
 
 状态枚举: 待付款 / 已发货 / 已完成 / 已退款
-认证角色: admin (管理员) / user (普通用户)
-知识库分类: 产品信息 / 尺码指南 / 售后政策 / 面料知识 / 品牌故事（支持自定义）
+用户角色: is_admin=1 (管理员) / is_admin=0 (普通用户)
+知识库分类: 产品信息(含8篇SKU) / 尺码指南 / 售后政策 / 面料知识 / 品牌故事（支持自定义）
 知识库性别: 男 / 女 / 通用 / 儿童
+
+> v0.3.0 重构说明: users 与 auth_users 合并为统一 users 表，去 email 字段，订单查询通过 JOIN 返回 username+phone（规范化设计，订单表不冗余用户信息）
 
 ---
 
 ## 核心功能
 
-1. **多页面 Web 前端**: 登录页 / 智能客服聊天 / 知识库管理后台 → http://localhost:8000
+1. **多页面 Web 前端**: 登录页 / 智能客服聊天 / 管理后台（三标签：用户管理+订单管理+文档管理）→ http://localhost:8000
 2. **Agent 工具调用**: 查用户、查订单、查物流、向量检索知识库、尺码推荐（共 6 个工具）
-3. **RAG 知识问答**: ChromaDB 向量检索 + 19 条服装知识库 + 引用来源展示
-4. **用户认证**: 注册/登录/JWT 令牌/权限校验（admin/user 角色）
+3. **RAG 知识问答**: ChromaDB 向量检索 + 27 条服装知识库（含 8 篇具体 SKU 参数文档）+ 引用来源展示
+4. **用户认证**: 注册/登录/JWT 令牌/权限校验（admin/user 角色，统一 users 表管理）
 5. **会话管理**: 多轮对话历史存储与恢复 + 删除会话（级联删除消息）
-6. **知识库管理**: 文档 CRUD + 分类管理（支持自定义新增）+ 性别过滤 + 向量同步（admin 权限）+ 10 条/页分页
-7. **企业级基础设施**: 结构化日志 + 全局异常 + API 限流 + 请求计时 + 启动时数据库自动迁移
+6. **管理后台**: 三标签界面 — 用户管理（列表查看）/ 订单管理（列表+详情，JOIN 返回用户信息）/ 文档管理（CRUD + 分类管理 + 性别过滤 + 10 条/页分页 + 索引重建）
+7. **企业级基础设施**: 结构化日志 + 全局异常 + API 限流 + 请求计时 + 启动时数据库自动迁移（检测旧 schema 自动删库重建）
 
 ---
 

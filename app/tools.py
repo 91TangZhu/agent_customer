@@ -42,8 +42,8 @@ def lookup_user_by_phone(phone: str) -> str:
     if not user:
         return f"未找到手机号为 {phone} 的用户。"
     return (
-        f"用户信息：姓名={user['name']}，手机={user['phone']}，"
-        f"邮箱={user['email']}，注册时间={user['created_at']}"
+        f"用户信息：用户名={user['username']}，手机={user['phone']}，"
+        f"注册时间={user['created_at']}"
     )
 
 
@@ -52,7 +52,10 @@ def lookup_orders_by_user_id(user_id: int) -> str:
     orders = query_orders_by_user_id(user_id)
     if not orders:
         return f"用户 ID {user_id} 暂无订单记录。"
-    lines = [f"用户 ID {user_id} 的订单（共{len(orders)}条）："]
+    # 从 JOIN 结果中提取用户名和手机号
+    username = orders[0].get("username", "未知")
+    phone = orders[0].get("phone", "未知")
+    lines = [f"用户 {username}（{phone}）的订单（共{len(orders)}条）："]
     for o in orders:
         lines.append(
             f"  · 订单号={o['order_no']}，商品={o['product_name']}，"
@@ -67,7 +70,9 @@ def lookup_order_by_no(order_no: str) -> str:
     if not order:
         return f"未找到订单号为 {order_no} 的订单。"
     return (
-        f"订单详情：订单号={order['order_no']}，商品={order['product_name']}，"
+        f"订单详情：订单号={order['order_no']}，"
+        f"用户={order.get('username', '未知')}（{order.get('phone', '未知')}），"
+        f"商品={order['product_name']}，"
         f"金额={order['amount']}元，状态={order['status']}，"
         f"下单时间={order['created_at']}"
     )

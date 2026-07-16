@@ -13,7 +13,8 @@ from app.models import (
     SessionCreateRequest, SessionCreateResponse,
     SessionListItem, SessionMessage,
     DocumentCreate, DocumentUpdate, DocumentResponse, DocumentListResponse,
-    Citation,
+    BatchDeleteRequest, Citation,
+    AdminUserItem, AdminOrderItem, AdminOrderDetail,
 )
 from app.agent import chat as agent_chat
 from app.auth import (
@@ -60,11 +61,11 @@ async def startup():
 @app.post("/auth/register")
 async def register(req: RegisterRequest):
     """用户注册"""
-    from app.database import create_auth_user, get_auth_user_by_username
+    from app.database import create_user, get_user_by_username
 
-    if get_auth_user_by_username(req.username):
+    if get_user_by_username(req.username):
         raise HTTPException(status_code=409, detail="用户名已存在")
-    user_id = create_auth_user(req.username, hash_password(req.password), is_admin=0)
+    user_id = create_user(req.username, hash_password(req.password), is_admin=0)
     auth_log.info("新用户注册: id=%d username=%s", user_id, req.username)
     return {"id": user_id, "username": req.username, "message": "注册成功"}
 
@@ -72,9 +73,9 @@ async def register(req: RegisterRequest):
 @app.post("/auth/login", response_model=LoginResponse)
 async def login(req: LoginRequest):
     """用户登录，返回 JWT 令牌"""
-    from app.database import get_auth_user_by_username
+    from app.database import get_user_by_username
 
-    user = get_auth_user_by_username(req.username)
+    user = get_user_by_username(req.username)
     if not user or not verify_password(req.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     token = create_access_token(user["id"], user["username"], bool(user["is_admin"]))
@@ -90,9 +91,9 @@ async def login(req: LoginRequest):
 @app.post("/auth/change-password")
 async def change_password(req: ChangePasswordRequest, user: dict = Depends(get_current_user)):
     """修改密码（需提供旧密码验证）"""
-    from app.database import get_auth_user_by_id, update_password
+    from app.database import get_user_by_id, update_password
 
-    db_user = get_auth_user_by_id(user["user_id"])
+    db_user = get_user_by_id(user["user_id"])
     if not db_user or not verify_password(req.old_password, db_user["password_hash"]):
         raise HTTPException(status_code=401, detail="旧密码错误")
     update_password(user["user_id"], hash_password(req.new_password))
@@ -201,6 +202,27 @@ async def admin_create_document(
     return {"id": doc_id, "message": "文档添加成功"}
 
 
+@app.post("/admin/kb/documents/batch-delete")
+async def admin_batch_delete_documents(
+    req: BatchDeleteRequest,
+    user: dict = Depends(require_admin),
+):
+    """管理员：批量删除知识库文档"""
+    from app.database import delete_document
+    from app.rag import delete_document as rag_delete
+
+    deleted = 0
+    failed = []
+    for doc_id in req.ids:
+        if delete_document(doc_id):
+            rag_delete(doc_id)
+            deleted += 1
+        else:
+            failed.append(doc_id)
+    app_log.info("管理员批量删除文档: %d成功 %d失败", deleted, len(failed))
+    return {"message": f"成功删除 {deleted} 条文档", "deleted": deleted, "failed": failed}
+
+
 @app.put("/admin/kb/documents/{doc_id}")
 async def admin_update_document(
     doc_id: int,
@@ -260,6 +282,42 @@ async def admin_get_categories(user: dict = Depends(require_admin)):
     """管理员：获取所有文档分类"""
     from app.database import get_categories
     return get_categories()
+
+
+# ==================== 管理后台：用户管理 ====================
+
+@app.get("/admin/users", response_model=list[AdminUserItem])
+async def admin_list_users(user: dict = Depends(require_admin)):
+    """管理员：获取所有用户列表"""
+    from app.database import list_all_users
+    users = list_all_users()
+    return [AdminUserItem(
+        id=u["id"],
+        username=u["username"],
+        phone=u.get("phone"),
+        is_admin=bool(u["is_admin"]),
+        created_at=u["created_at"],
+    ) for u in users]
+
+
+# ==================== 管理后台：订单管理 ====================
+
+@app.get("/admin/orders", response_model=list[AdminOrderItem])
+async def admin_list_orders(user: dict = Depends(require_admin)):
+    """管理员：获取所有订单列表（含用户名和手机号）"""
+    from app.database import list_all_orders
+    orders = list_all_orders()
+    return [AdminOrderItem(**o) for o in orders]
+
+
+@app.get("/admin/orders/{order_id}", response_model=AdminOrderDetail)
+async def admin_get_order(order_id: int, user: dict = Depends(require_admin)):
+    """管理员：获取单个订单详情"""
+    from app.database import get_order_by_id
+    order = get_order_by_id(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="订单不存在")
+    return AdminOrderDetail(**order)
 
 
 # ==================== 聊天路由 ====================
@@ -619,28 +677,54 @@ CHAT_PAGE = r"""
 <div id="page-admin" class="page">
     <aside class="admin-sidebar">
         <div style="padding:12px 20px;font-weight:700;color:#fff;font-size:15px;">⚙️ 管理后台</div>
-        <div class="nav-item active" onclick="adminSwitchTab('docs')">📄 文档管理</div>
+        <div class="nav-item active" onclick="adminSwitchTab('users')">👥 用户管理</div>
+        <div class="nav-item" onclick="adminSwitchTab('orders')">📦 订单管理</div>
+        <div class="nav-item" onclick="adminSwitchTab('docs')">📄 文档管理</div>
         <div class="nav-item" onclick="showPage('chat')">💬 返回聊天</div>
     </aside>
     <main class="admin-main">
         <div class="admin-topbar">
-            <span style="font-weight:700;">知识库文档管理</span>
-            <button class="btn btn-primary btn-sm" onclick="openDocModal()">＋ 添加文档</button>
+            <span style="font-weight:700;" id="admin-tab-title">用户管理</span>
+            <button class="btn btn-primary btn-sm" id="btn-add-doc" onclick="openDocModal()" style="display:none">＋ 添加文档</button>
         </div>
         <div class="admin-content">
-            <div class="admin-toolbar">
-                <select id="kb-cat-filter" onchange="loadDocs()">
-                    <option value="">全部分类</option>
-                </select>
-                <button class="btn btn-outline btn-sm" onclick="initKB()" id="btn-init-kb">🔄 初始化默认知识库</button>
+            <!-- ===== 用户管理标签 ===== -->
+            <div id="admin-tab-users">
+                <table>
+                    <thead>
+                        <tr><th>ID</th><th>用户名</th><th>手机号</th><th>管理员</th><th>注册时间</th></tr>
+                    </thead>
+                    <tbody id="user-table-body"></tbody>
+                </table>
             </div>
-            <table>
-                <thead>
-                    <tr><th>ID</th><th>标题</th><th>分类</th><th>性别</th><th>更新时间</th><th>操作</th></tr>
-                </thead>
-                <tbody id="doc-table-body"></tbody>
-            </table>
-            <div id="doc-pagination" style="margin-top:16px;text-align:center;"></div>
+            <!-- ===== 订单管理标签 ===== -->
+            <div id="admin-tab-orders" style="display:none">
+                <table>
+                    <thead>
+                        <tr><th>ID</th><th>订单号</th><th>用户名</th><th>手机号</th><th>商品</th><th>金额</th><th>状态</th><th>下单时间</th></tr>
+                    </thead>
+                    <tbody id="order-table-body"></tbody>
+                </table>
+            </div>
+            <!-- ===== 文档管理标签 ===== -->
+            <div id="admin-tab-docs" style="display:none">
+                <div class="admin-toolbar">
+                    <select id="kb-cat-filter" onchange="loadDocs()">
+                        <option value="">全部分类</option>
+                    </select>
+                    <button class="btn btn-outline btn-sm" onclick="initKB()" id="btn-init-kb">🔄 初始化默认知识库</button>
+                    <button class="btn btn-outline btn-sm" id="btn-batch-mode" onclick="toggleBatchMode()">🗑 批量删除</button>
+                    <button class="btn btn-danger btn-sm" id="btn-batch-confirm" onclick="batchDeleteDocs()" style="display:none" disabled>确认删除</button>
+                    <span id="selected-count" style="display:none;font-size:13px;color:var(--danger);margin-left:8px;"></span>
+                </div>
+                <table>
+                    <thead>
+                        <tr><th class="batch-col" style="display:none"><input type="checkbox" id="select-all" onchange="toggleSelectAll()" title="全选/取消全选"></th><th>ID</th><th>标题</th><th>分类</th><th>性别</th><th>更新时间</th><th>操作</th></tr>
+                    </thead>
+                    <tbody id="doc-table-body"></tbody>
+                </table>
+                <div id="doc-pagination" style="margin-top:16px;text-align:center;"></div>
+            </div>
         </div>
     </main>
 </div>
@@ -699,7 +783,7 @@ function showPage(name) {
     const target = document.getElementById('page-' + name);
     if (target) target.classList.add('active');
     if (name === 'chat') loadSessions();
-    if (name === 'admin') { loadDocs(); loadCategories(); }
+    if (name === 'admin') { adminSwitchTab(adminCurrentTab || 'users'); }
 }
 
 // ==================== Toast ====================
@@ -962,7 +1046,7 @@ async function loadDocs(page) {
         const data = await api('GET', '/admin/kb/documents?category=' + encodeURIComponent(cat) + '&page=' + currentPage + '&page_size=10');
         const tbody = document.getElementById('doc-table-body');
         tbody.innerHTML = data.items.map(d =>
-            '<tr><td>' + d.id + '</td><td>' + escHtml(d.title) + '</td><td>' + escHtml(d.category) +
+            '<tr><td class="batch-col" style="display:none"><input type="checkbox" class="doc-check" value="' + d.id + '" onchange="onCheckChange()"></td><td>' + d.id + '</td><td>' + escHtml(d.title) + '</td><td>' + escHtml(d.category) +
             '</td><td>' + escHtml(d.gender || '通用') + '</td><td>' + d.updated_at + '</td><td class="actions">' +
             '<button class="btn btn-outline btn-sm" onclick="editDoc(' + d.id + ',\'' + escHtml(d.title) + '\',\'' + escHtml(d.category) + '\',\'' + escHtml(d.gender || '通用') + '\',\'' + escHtml(d.content.replace(/'/g, "\\'").replace(/\n/g, '\\n')) + '\')">编辑</button>' +
             '<button class="btn btn-danger btn-sm" onclick="deleteDoc(' + d.id + ')">删除</button></td></tr>'
@@ -1085,6 +1169,81 @@ async function deleteDoc(id) {
     } catch(e) { toast('删除失败: ' + e.message, 'error'); }
 }
 
+// ==================== 批量删除 ====================
+let batchMode = false;
+
+function toggleBatchMode() {
+    batchMode = !batchMode;
+    // 显示/隐藏所有勾选列
+    document.querySelectorAll('.batch-col').forEach(el => el.style.display = batchMode ? '' : 'none');
+    const modeBtn = document.getElementById('btn-batch-mode');
+    const confirmBtn = document.getElementById('btn-batch-confirm');
+    if (batchMode) {
+        modeBtn.textContent = '取消';
+        confirmBtn.style.display = '';
+    } else {
+        modeBtn.textContent = '🗑 批量删除';
+        confirmBtn.style.display = 'none';
+        // 退出时清空勾选
+        document.getElementById('select-all').checked = false;
+        document.querySelectorAll('.doc-check').forEach(cb => cb.checked = false);
+    }
+    updateBatchUI();
+}
+
+function getCheckedIds() {
+    return [...document.querySelectorAll('.doc-check:checked')].map(cb => parseInt(cb.value));
+}
+
+function toggleSelectAll() {
+    const checked = document.getElementById('select-all').checked;
+    document.querySelectorAll('.doc-check').forEach(cb => cb.checked = checked);
+    updateBatchUI();
+}
+
+function onCheckChange() {
+    const all = document.querySelectorAll('.doc-check');
+    const checked = document.querySelectorAll('.doc-check:checked');
+    document.getElementById('select-all').checked = all.length > 0 && checked.length === all.length;
+    updateBatchUI();
+}
+
+function updateBatchUI() {
+    const ids = getCheckedIds();
+    const confirmBtn = document.getElementById('btn-batch-confirm');
+    const span = document.getElementById('selected-count');
+    if (batchMode && ids.length > 0) {
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = '确认删除(' + ids.length + ')';
+        span.style.display = '';
+        span.textContent = '';
+    } else if (batchMode) {
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = '确认删除';
+        span.style.display = 'none';
+    } else {
+        span.style.display = 'none';
+    }
+}
+
+async function batchDeleteDocs() {
+    const ids = getCheckedIds();
+    if (ids.length === 0) return toast('请先勾选要删除的文档', 'error');
+    if (!confirm('确定要删除选中的 ' + ids.length + ' 条文档吗？此操作不可撤销！')) return;
+    try {
+        const res = await api('POST', '/admin/kb/documents/batch-delete', { ids: ids });
+        // 退出批量模式
+        batchMode = false;
+        document.querySelectorAll('.batch-col').forEach(el => el.style.display = 'none');
+        document.getElementById('btn-batch-mode').textContent = '🗑 批量删除';
+        document.getElementById('btn-batch-confirm').style.display = 'none';
+        document.getElementById('select-all').checked = false;
+        loadDocs();
+        updateBatchUI();
+        toast(res.message, 'success');
+    } catch(e) { toast('批量删除失败: ' + e.message, 'error'); }
+}
+
 async function initKB() {
     const btn = document.getElementById('btn-init-kb');
     btn.disabled = true; btn.textContent = '初始化中...';
@@ -1096,7 +1255,54 @@ async function initKB() {
     btn.disabled = false; btn.textContent = '🔄 初始化默认知识库';
 }
 
-function adminSwitchTab(tab) { /* 当前只有文档管理，预留扩展 */ }
+let adminCurrentTab = 'users';
+
+function adminSwitchTab(tab) {
+    adminCurrentTab = tab;
+    // 侧边栏高亮
+    const tabs = { users: '用户管理', orders: '订单管理', docs: '文档管理' };
+    document.querySelectorAll('.admin-sidebar .nav-item').forEach(el => {
+        el.classList.remove('active');
+        if (el.textContent.includes(tabs[tab] || '')) el.classList.add('active');
+    });
+    // 切换面板
+    ['users', 'orders', 'docs'].forEach(t => {
+        const panel = document.getElementById('admin-tab-' + t);
+        if (panel) panel.style.display = (t === tab) ? '' : 'none';
+    });
+    // 顶部标题和按钮
+    const titles = { users: '用户管理', orders: '订单管理', docs: '知识库文档管理' };
+    document.getElementById('admin-tab-title').textContent = titles[tab] || '';
+    document.getElementById('btn-add-doc').style.display = (tab === 'docs') ? '' : 'none';
+    // 加载数据
+    if (tab === 'users') loadUsers();
+    if (tab === 'orders') loadOrders();
+    if (tab === 'docs') { loadDocs(); loadCategories(); }
+}
+
+async function loadUsers() {
+    try {
+        const users = await api('GET', '/admin/users');
+        const tbody = document.getElementById('user-table-body');
+        tbody.innerHTML = users.map(u =>
+            '<tr><td>' + u.id + '</td><td>' + escHtml(u.username) + '</td><td>' + (u.phone || '-') +
+            '</td><td>' + (u.is_admin ? '是' : '否') + '</td><td>' + u.created_at + '</td></tr>'
+        ).join('');
+    } catch(e) { toast('加载用户列表失败: ' + e.message, 'error'); }
+}
+
+async function loadOrders() {
+    try {
+        const orders = await api('GET', '/admin/orders');
+        const tbody = document.getElementById('order-table-body');
+        tbody.innerHTML = orders.map(o =>
+            '<tr><td>' + o.id + '</td><td>' + escHtml(o.order_no) + '</td><td>' + escHtml(o.username) +
+            '</td><td>' + (o.phone || '-') + '</td><td>' + escHtml(o.product_name) +
+            '</td><td>¥' + o.amount.toFixed(2) + '</td><td>' + escHtml(o.status) +
+            '</td><td>' + o.created_at + '</td></tr>'
+        ).join('');
+    } catch(e) { toast('加载订单列表失败: ' + e.message, 'error'); }
+}
 
 // ==================== 初始化 ====================
 window.onload = function() {
