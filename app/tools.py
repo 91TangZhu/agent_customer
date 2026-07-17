@@ -23,6 +23,30 @@ _rag_citations: contextvars.ContextVar[list[dict]] = contextvars.ContextVar(
     "rag_citations", default=[]
 )
 
+# ContextVar：当前登录用户 ID（用于隐私保护校验）
+_current_user_id: contextvars.ContextVar[int | None] = contextvars.ContextVar(
+    "current_user_id", default=None
+)
+
+# ContextVar：用户通过手机号查询锁定的目标用户 ID
+# 当 lookup_user_by_phone 查到的是他人（非当前登录用户）时设置此值，
+# 后续 lookup_order_by_no / lookup_logistics 必须交叉校验订单是否归属该目标用户。
+_target_user_id: contextvars.ContextVar[int | None] = contextvars.ContextVar(
+    "target_user_id", default=None
+)
+
+# ContextVar：已通过订单编号验证的订单 ID 集合
+_verified_order_ids: contextvars.ContextVar[set] = contextvars.ContextVar(
+    "verified_order_ids", default=set()
+)
+
+
+def set_current_user(user_id: int | None) -> None:
+    """设置当前请求的用户上下文（由 agent.chat() 在每次请求开始时调用）"""
+    _current_user_id.set(user_id)
+    _target_user_id.set(None)
+    _verified_order_ids.set(set())
+
 
 def get_citations() -> list[dict]:
     """获取当前请求上下文中收集的 RAG 引用（由 agent.py 在请求结束后调用）"""
@@ -37,10 +61,21 @@ def clear_citations() -> None:
 # ==================== 原有工具 ====================
 
 def lookup_user_by_phone(phone: str) -> str:
-    """根据手机号查询用户信息。当你需要查找某个手机号对应的用户时调用。"""
+    """
+    根据手机号查询用户信息。当你需要查找某个手机号对应的用户时调用。
+
+    隐私保护：如果查到的用户不是当前登录用户，工具会自动锁定该目标用户，
+    后续查订单号/物流时将强制校验订单是否归属该用户。
+    """
+    current_uid = _current_user_id.get()
     user = query_user_by_phone(phone)
     if not user:
         return f"未找到手机号为 {phone} 的用户。"
+
+    # 如果查到的不是当前登录用户 → 锁定目标，后续订单号/物流必须匹配此人
+    if current_uid is not None and user["id"] != current_uid:
+        _target_user_id.set(user["id"])
+
     return (
         f"用户信息：用户名={user['username']}，手机={user['phone']}，"
         f"注册时间={user['created_at']}"
@@ -48,7 +83,22 @@ def lookup_user_by_phone(phone: str) -> str:
 
 
 def lookup_orders_by_user_id(user_id: int) -> str:
-    """查询某用户的所有订单。当用户问"我的订单"或需要查某人订单时调用。"""
+    """
+    查询某用户的所有订单。当用户问"我的订单"或需要查某人订单时调用。
+
+    隐私保护：如果查询的用户不是当前登录用户，必须要求提供订单编号验证。
+    只有查自己绑定手机号下的订单时才可以直接列出。
+    """
+    current_uid = _current_user_id.get()
+
+    # 隐私保护：登录用户查他人订单 → 拦截，要求提供订单编号
+    if current_uid is not None and current_uid != user_id:
+        return (
+            f"[隐私保护]：该手机号对应的用户并非当前登录用户，无法直接查看其订单列表。\n"
+            f"如需帮他人查询订单或物流状态，请提供该订单的具体**订单编号**进行验证。\n"
+            f"（订单编号是查询订单信息的核心凭证）"
+        )
+
     orders = query_orders_by_user_id(user_id)
     if not orders:
         return f"用户 ID {user_id} 暂无订单记录。"
@@ -65,10 +115,33 @@ def lookup_orders_by_user_id(user_id: int) -> str:
 
 
 def lookup_order_by_no(order_no: str) -> str:
-    """根据订单号精确查询订单详情。当用户提供具体订单号时调用。"""
+    """
+    根据订单号精确查询订单详情。当用户提供具体订单号时调用。
+
+    隐私保护规则：
+    - 如果之前通过手机号锁定了目标用户（_target_user_id），
+      则此订单必须归属该目标用户，否则拒绝（订单号与手机号不匹配）。
+    - 如果未锁定目标（直接提供订单号），订单编号本身即为核心凭证，允许查询。
+    - 查到的订单会自动标记为已验证，后续可直接查物流。
+    """
     order = query_order_by_no(order_no)
     if not order:
         return f"未找到订单号为 {order_no} 的订单。"
+
+    target_uid = _target_user_id.get()
+
+    # 交叉校验：如果之前通过手机号锁定了目标用户，订单必须归属该用户
+    if target_uid is not None and order["user_id"] != target_uid:
+        return (
+            f"[隐私保护] 订单号 {order_no} 与您提供的手机号不匹配，请核实后重试。\n"
+            f"（该订单不属于手机号对应的用户）"
+        )
+
+    # 将该订单标记为"已验证"，后续 lookup_logistics 可直接放行
+    verified = _verified_order_ids.get()
+    verified.add(order["id"])
+    _verified_order_ids.set(verified)
+
     return (
         f"订单详情：订单号={order['order_no']}，"
         f"用户={order.get('username', '未知')}（{order.get('phone', '未知')}），"
@@ -79,7 +152,39 @@ def lookup_order_by_no(order_no: str) -> str:
 
 
 def lookup_logistics(order_id: int) -> str:
-    """查询订单的物流信息。当用户问"物流到哪了"或"快递进度"时调用。需要先查到订单ID。"""
+    """
+    查询订单的物流信息。当用户问"物流到哪了"或"快递进度"时调用。
+    需要先通过 lookup_order_by_no 或 lookup_orders_by_user_id 获取订单 ID。
+
+    隐私保护：
+    - 如果之前通过手机号锁定了目标用户，订单必须归属该用户
+    - 否则，订单必须属于当前登录用户或已通过订单编号验证
+    """
+    from app.database import get_order_by_id
+
+    current_uid = _current_user_id.get()
+    target_uid = _target_user_id.get()
+    verified = _verified_order_ids.get()
+
+    order = get_order_by_id(order_id)
+    if not order:
+        return f"订单 ID {order_id} 不存在。"
+
+    # 如果之前通过手机号锁定了目标用户 → 强制交叉校验
+    if target_uid is not None:
+        if order["user_id"] != target_uid:
+            return (
+                f"[隐私保护] 该订单不属于手机号对应的用户，无法查看物流信息。\n"
+                f"请确认订单编号与手机号匹配后重试。"
+            )
+    elif current_uid is not None and order_id not in verified:
+        # 无手机号锁定 → 校验是否为本人订单
+        if order["user_id"] != current_uid:
+            return (
+                f"[隐私保护] 该订单不属于当前登录用户，无法直接查看物流信息。\n"
+                f"请先提供该订单的**订单编号**进行验证。"
+            )
+
     logistics = query_logistics_by_order_id(order_id)
     if not logistics:
         return f"订单 ID {order_id} 暂无物流信息。"

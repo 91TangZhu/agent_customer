@@ -651,7 +651,7 @@ CHAT_PAGE = r"""
             <span class="brand">👗 服装电商智能客服</span>
             <div class="user-info">
                 <span id="current-username"></span>
-                <a id="admin-link" style="display:none" onclick="showPage('admin')">⚙️ 知识库管理</a>
+                <a id="admin-link" style="display:none" onclick="showPage('admin')">⚙️ 后台管理</a>
                 <a onclick="openChangePwdModal()">修改密码</a>
                 <a onclick="logout()">退出</a>
             </div>
@@ -868,6 +868,10 @@ function logout() {
     TOKEN = ''; USER = null; currentSessionId = null;
     localStorage.removeItem('access_token');
     localStorage.removeItem('user_info');
+    // 清空登录表单
+    document.getElementById('login-username').value = '';
+    document.getElementById('login-password').value = '';
+    document.getElementById('login-error').style.display = 'none';
     showPage('login');
     document.getElementById('msgs').innerHTML = '<div class="msg ai">你好！我是服装电商智能客服助手...</div>';
 }
@@ -1306,17 +1310,11 @@ async function loadOrders() {
 
 // ==================== 初始化 ====================
 window.onload = function() {
+    // 始终先显示登录页，用户需手动登录
+    showPage('login');
     if (TOKEN && USER) {
-        document.getElementById('current-username').textContent = USER.username;
-        document.getElementById('admin-link').style.display = USER.is_admin ? '' : 'none';
-        showPage('chat');
-        loadSessions().then(function(sessions) {
-            if (!sessions || sessions.length === 0) {
-                newSession();
-            }
-        });
-    } else {
-        showPage('login');
+        // 预填用户名方便快速登录
+        document.getElementById('login-username').value = USER.username;
     }
 };
 </script>

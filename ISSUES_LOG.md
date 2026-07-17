@@ -70,6 +70,103 @@
 
 ---
 
+## 批次 #2 — 2026-07-16
+
+### 问题清单
+
+| # | 问题描述 | 优先级 | 状态 |
+|---|---------|--------|------|
+| 9 | 种子订单数据为电子产品，与服装电商定位不符 | P2 | ✅ 已修复 |
+| 10 | users 与 auth_users 表分裂，订单无法关联用户名/手机号 | P1 | ✅ 已修复 |
+| 11 | 管理后台仅有文档管理，缺少用户/订单管理页面 | P2 | ✅ 已修复 |
+| 12 | 知识库「产品信息」缺少具体服装 SKU 数据 | P2 | ✅ 已修复 |
+| 13 | 用户查询返回 email 字段，不需要 | P3 | ✅ 已修复 |
+| 14 | 客服查订单时不显示用户名和手机号 | P1 | ✅ 已修复 |
+
+### 修复详情
+
+#### 问题9: 种子订单数据域不匹配
+- **根因**: `db_init.py` 中 8 条订单全部为 Apple 电子产品（iPhone/MacBook/iPad 等），与「服装电商智能客服」定位完全不符
+- **修复**: 将 8 条订单全部替换为服装商品：羊毛混纺大衣 ¥1599、纯棉T恤 ¥129、真丝连衣裙 ¥899、莫代尔打底衫 ¥99、商务西裤 ¥399、弹力牛仔小脚裤 ¥259、冰丝防晒外套 ¥299、天丝亚麻阔腿裤 ¥329
+- **影响文件**: `db_init.py`
+
+#### 问题10: users / auth_users 表合并
+- **根因**: 业务客户表 `users`（name/phone/email）和登录认证表 `auth_users`（username/password_hash/is_admin）是两张独立的表，没有关联。`orders.user_id` → `users.id`，`chat_sessions.user_id` → `auth_users.id`，导致查订单时无法获取注册用户名
+- **修复**:
+  - 合并为统一 `users` 表（id/username/password_hash/phone/is_admin/created_at）
+  - 去掉 `name` 和 `email` 字段
+  - 表数量从 7 减为 6
+  - `migrate_database()` 自动检测旧 schema (auth_users 表或 users.name 列) 并重建
+  - 数据库函数重命名: `create_auth_user` → `create_user`, `get_auth_user_by_username` → `get_user_by_username`, `get_auth_user_by_id` → `get_user_by_id`
+  - 种子用户 6 人: admin(管理员)/testuser/lihua/wangfang/zhangwei/chenjing
+- **影响文件**: `db_init.py`, `app/database.py`, `app/models.py`, `app/main.py`
+
+#### 问题11: 管理后台扩展
+- **根因**: 管理后台 (`#page-admin`) 只有一个文档管理标签，`adminSwitchTab` 是空函数 stub，注释写着「当前只有文档管理，预留扩展」
+- **修复**:
+  - 新增 `GET /admin/users`、`GET /admin/orders`、`GET /admin/orders/{order_id}` 三个 API
+  - 前端侧边栏增加三个标签：👥用户管理 / 📦订单管理 / 📄文档管理
+  - `adminSwitchTab` 实现动态面板切换、侧边栏高亮、顶部标题自适应
+  - 新增 `loadUsers()` 和 `loadOrders()` 函数渲染数据表格
+  - 订单表显示用户名 + 手机号（通过 JOIN 查询）
+- **影响文件**: `app/main.py`, `app/models.py`, `app/database.py`
+
+#### 问题12: 知识库产品 SKU 数据补充
+- **根因**: 知识库「产品信息」分类仅有面料特性、新品系列、羽绒服选购 3 篇通用内容，缺少具体商品 SKU 参数（面料成分、尺码范围、价格、颜色等），Agent 无法回答具体产品咨询
+- **修复**: 新增 8 篇产品 SKU 文档（知识库从 19 篇增至 27 篇）：
+  - 夏季纯棉T恤系列、商务休闲西裤、真丝连衣裙春夏系列、防晒外套/皮肤衣选购参数
+  - 羊毛混纺大衣秋冬系列、弹力牛仔下装系列、天丝亚麻混纺透气系列、莫代尔居家内衣系列
+  - 每篇含 SKU 格式、面料成分、尺码范围、价格区间、颜色选项、洗涤要求
+- **影响文件**: `app/kb_seed_data.py`, `app/agent.py`
+
+#### 问题13: 移除 email 字段
+- **修复**:
+  - `users` 表去掉 `email` 列
+  - `tools.py` 中 `lookup_user_by_phone` 返回值移除 email，`name` → `username`
+  - 前端用户管理表格不显示 email 列
+- **影响文件**: `db_init.py`, `app/tools.py`, `app/models.py`
+
+#### 问题14: 订单查询显示用户名和手机号
+- **根因**: `query_orders_by_user_id` 和 `query_order_by_no` 只查 `orders` 表，不关联用户信息
+- **修复**:
+  - 两个查询函数均 JOIN `users` 表，返回 username + phone
+  - `tools.py` 工具返回字符串中订单头部和详情均包含用户名+手机号
+  - 管理后台新增 `list_all_orders()` 和 `get_order_by_id()` 同样 JOIN
+  - **设计决策**: 不在 orders 表冗余存储 username/phone，仅保留 user_id FK，通过 JOIN 获取（避免数据不一致）
+- **影响文件**: `app/database.py`, `app/tools.py`, `app/models.py`, `app/main.py`
+
+---
+
+## 批次 #3 — 2026-07-17
+
+### 问题清单
+
+| # | 问题描述 | 优先级 | 状态 |
+|---|---------|--------|------|
+| 15 | 用户可用他人手机号直接查订单/物流，缺少隐私保护 | P1 | ✅ 已修复 |
+
+### 修复详情
+
+#### 问题15: 手机号查他人订单缺少验证
+
+- **场景**: 登录用户提供非本人手机号 → Agent 可直接调用 `lookup_orders_by_user_id` 列出该手机号对应的所有订单（含金额/商品/状态），并能顺藤摸瓜查物流。现实中帮朋友查快递需要订单编号作为授权凭证，只给手机号不应放行。
+- **根因**: 三个工具函数（`lookup_orders_by_user_id` / `lookup_order_by_no` / `lookup_logistics`）均为纯业务查询，不感知"当前登录用户是谁"，无法区分"查自己的"和"查别人的"。
+- **修复（v2 — 交叉校验）**:
+  - 新增三个 ContextVar：`_current_user_id`（当前登录用户）、`_target_user_id`（手机号锁定的目标用户）、`_verified_order_ids`（已验证订单白名单）
+  - `lookup_user_by_phone`：查到他人时自动设置 `_target_user_id`，锁定查询目标
+  - `lookup_orders_by_user_id`：他人 → 拦截，要求提供订单编号
+  - `lookup_order_by_no`：**双重校验**——若 `_target_user_id` 已锁定，订单必须归属该用户（手机号与订单号交叉校验），否则就算订单存在也拒绝；无锁定时订单编号自身即为核心凭证
+  - `lookup_logistics`：**双重校验**——优先检查 `_target_user_id` 锁定 → 其次检查 `_verified_order_ids` 白名单 → 最后检查是否本人订单
+  - `agent.py` 的 `chat()` 每次请求开始时初始化上下文；SYSTEM_PROMPT 新增隐私保护规则
+  - 匿名用户不受影响（所有校验在 `_current_user_id` 为 None 时跳过）
+- **设计原则**: 
+  - 手机号 → 查自己全放行，查他人锁目标
+  - 订单编号 → 必须跟手机号锁定的人对上，对不上就拒绝（防止用 Bob 的手机号 + Charlie 的订单号绕过）
+  - 直接给订单编号（无手机号）→ 订单编号即凭证
+- **影响文件**: `app/tools.py`, `app/agent.py`
+
+---
+
 ## 历史批次
 
 （待后续补充）

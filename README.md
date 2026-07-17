@@ -51,6 +51,7 @@ python db_init.py
 
 ### 5. 启动服务
 ```bash
+conda activate agent_customer
 uvicorn app.main:app --reload
 ```
 打开 **http://localhost:8000** 进入聊天页面。

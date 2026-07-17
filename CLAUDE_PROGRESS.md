@@ -8,7 +8,7 @@
 ## 当前状态
 
 - **版本**: v0.3.0
-- **最后更新**: 2026-07-16
+- **最后更新**: 2026-07-17
 - **进行中**: 无
 - **待办**: 见下方「待办事项」
 
@@ -243,6 +243,35 @@
   - 修改: `db_init.py`, `app/database.py`, `app/models.py`, `app/tools.py`, `app/main.py`, `app/kb_seed_data.py`, `app/agent.py`
 - **方案**: 统一用户表消除冗余，规范化设计（订单不冗余用户信息，通过 JOIN 获取），旧 schema 自动迁移采用激进策略（删库重建，因为此时无生产数据），管理后台遵循 FastAPI 路由顺序规则（`/admin/orders` 在 `/{order_id}` 之前声明）
 - **验证**: db_init.py 成功创建 6 表 + 6 用户 + 8 订单 + 5 物流；`/admin/users` 返回 6 用户（有 phone 无 email）；`/admin/orders` 返回 8 服装订单（JOIN 含 username+phone）；客服对话查用户/订单均正确展示服装业务数据；前端三标签切换 + JS 函数全部就位
+
+---
+
+### [2026-07-17] 体验优化: 登录页为默认入口 + 管理入口重命名
+- **类型**: 体验优化
+- **问题**: (1) 启动后若 localStorage 有旧 token 会直接跳转聊天/后台，用户期望先看到登录页 (2) 聊天页顶部管理员入口仍叫"知识库管理"，但后台已扩展为用户/订单/文档三标签
+- **概述**:
+  - `window.onload` 改为始终先显示登录页，有历史 token 则预填用户名方便快速登录
+  - 聊天页顶部链接 `⚙️ 知识库管理` → `⚙️ 后台管理`
+  - README.md 第 5 步启动命令补充 `conda activate agent_customer`
+- **影响文件**: `app/main.py`, `README.md`
+- **验证**: 清除 token 后刷新 → 登录页；保留 token 刷新 → 登录页（用户名预填）
+
+---
+
+### [2026-07-17] 安全: 订单/物流查询隐私保护——手机号与订单号交叉校验
+- **类型**: 功能开发 / 安全加固
+- **问题**: 登录用户用他人手机号可直接列出该手机号下所有订单，并能通过任意订单号查物流——手机号和订单号没有交叉校验，攻击者可用 Bob 的手机号 + Charlie 的订单号绕过验证
+- **概述**:
+  - `tools.py` 新增三个 ContextVar：`_current_user_id`（当前用户）、`_target_user_id`（手机号锁定目标）、`_verified_order_ids`（已验证订单白名单）
+  - `lookup_user_by_phone`：查到他人时锁定 `_target_user_id`
+  - `lookup_orders_by_user_id`：查他人 → 拦截要求提供订单编号
+  - `lookup_order_by_no`：若 `_target_user_id` 已锁定，订单必须归属该用户（交叉校验），否则拒绝；无锁定时订单编号即为凭证
+  - `lookup_logistics`：三重校验——优先 `_target_user_id` 锁定 → 其次已验证白名单 → 最后本人订单检查
+  - `agent.py`：`chat()` 每次请求初始化上下文；SYSTEM_PROMPT 新增隐私保护规则
+  - 匿名用户不受影响（`_current_user_id` 为 None 时全部跳过）
+- **影响文件**: `app/tools.py`, `app/agent.py`, `ISSUES_LOG.md`
+- **方案**: 手机号→锁定目标→订单号必须匹配目标，形成完整校验链。手机号+订单号缺一不可，且必须归属于同一人
+- **验证**: 四种场景全部通过——查自己放行、查他人+匹配订单放行、查他人+不匹配订单拒绝、直接给订单号放行
 
 ---
 
