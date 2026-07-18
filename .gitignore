@@ -26,6 +26,12 @@ logs/
 .vscode/
 .idea/
 
+# 面试文档（本地使用，不上传远程）
+RESUME.md
+INTERVIEW_PREP.md
+INTERVIEW_QA.md
+comment.txt
+
 # 系统文件
 .DS_Store
 Thumbs.db

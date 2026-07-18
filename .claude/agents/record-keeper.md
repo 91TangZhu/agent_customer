@@ -13,7 +13,7 @@ color: blue
 | 维度 | 现状 |
 |------|------|
 | 版本 | v0.2.0 |
-| 仓库 | git@github.com:91TangZhu/agent_customer.git |
+| 仓库 | git@github.com:TangZhu233/agent_customer.git |
 | 技术栈 | FastAPI + LangChain + LangGraph + DeepSeek + ChromaDB + text2vec-base-chinese |
 | 数据库 | SQLite, 7张表: users / orders / logistics / auth_users / documents / chat_sessions / chat_messages |
 | 核心模块 | main / agent / tools / models / database / auth / rag / logger / middleware / kb_seed_data |
@@ -54,7 +54,7 @@ color: blue
        urllib3.disable_warnings()
        headers = {"Authorization": f"Bearer {TOKEN}", "Accept": "application/vnd.github+json"}
        desc = "根据 PROJECT_SUMMARY.md 定位生成的中文描述"
-       requests.patch("https://api.github.com/repos/91TangZhu/agent_customer",
+       requests.patch("https://api.github.com/repos/TangZhu233/agent_customer",
            headers=headers, json={"description": desc}, verify=False)
    ```
 5. 报告结果（含描述是否更新成功）

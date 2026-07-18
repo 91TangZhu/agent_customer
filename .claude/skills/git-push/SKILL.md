@@ -40,7 +40,7 @@ if TOKEN:
     urllib3.disable_warnings()
     headers = {"Authorization": f"Bearer {TOKEN}", "Accept": "application/vnd.github+json"}
     new_desc = "<根据项目定位生成的中文描述>"
-    requests.patch("https://api.github.com/repos/91TangZhu/agent_customer",
+    requests.patch("https://api.github.com/repos/TangZhu233/agent_customer",
         headers=headers, json={"description": new_desc}, verify=False)
 ```
 

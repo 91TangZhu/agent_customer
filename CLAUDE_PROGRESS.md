@@ -60,7 +60,7 @@
 - **问题**: (1) 无 SSH 密钥每次推送需输密码 (2) 国内 GitHub 22 端口被墙
 - **影响文件**: `~/.ssh/id_ed25519` / `~/.ssh/config` / `.claude/skills/git-push.md`
 - **方案**: 生成 ED25519 密钥 → 配置走 443 端口 → 创建 `/git-push` 一键推送 Skill
-- **验证**: `ssh -T git@github.com` 返回 `Hi 91TangZhu!`
+- **验证**: `ssh -T git@github.com` 返回 `Hi TangZhu233!`
 
 ---
 

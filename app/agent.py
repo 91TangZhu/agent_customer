@@ -240,6 +240,8 @@ async def chat_stream(
     run_contents = {}   # run_id → 累积文本
     run_order = []      # LLM 调用顺序
 
+    stream_start = time.perf_counter()
+
     try:
         async for event in agent.astream_events({"messages": messages}, version="v2"):
             if event["event"] != "on_chat_model_stream":
@@ -276,4 +278,8 @@ async def chat_stream(
     # 收集引用
     citations = get_citations()
     citations_out = citations if citations else None
+
+    elapsed = round((time.perf_counter() - stream_start) * 1000, 2)
+    llm_log.info("LLM 流式调用完成: %.2fms model=%s", elapsed, settings.DEEPSEEK_MODEL)
+
     yield {"type": "done", "citations": citations_out}

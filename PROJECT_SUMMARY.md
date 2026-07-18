@@ -9,7 +9,7 @@
 | 字段 | 值 |
 |------|-----|
 | 项目名称 | 智能客服 Agent (agent_customer) |
-| 远程仓库 | git@github.com:91TangZhu/agent_customer.git |
+| 远程仓库 | git@github.com:TangZhu233/agent_customer.git |
 | 创建日期 | 2026-07-14 |
 | Python 版本 | 3.10 |
 | 虚拟环境 | Conda (agent_customer) 路径: `C:\Users\Administrator\.conda\envs\agent_customer` |
