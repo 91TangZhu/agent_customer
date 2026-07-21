@@ -1,5 +1,5 @@
 """
-中间件模块：全局异常捕获 + 请求耗时记录 + 限流（Phase 6 集成）。
+中间件模块：全局异常捕获 + 请求耗时记录 + API 限流。
 """
 import time
 import traceback
@@ -7,9 +7,15 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.middleware.base import BaseHTTPMiddleware
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.middleware import SlowAPIMiddleware
 from app.logger import get_logger
 
 api_log = get_logger("api")
+
+# 全局限流器：以客户端 IP 为 key
+limiter = Limiter(key_func=get_remote_address)
 
 
 # ==================== 全局异常捕获 ====================
@@ -64,6 +70,8 @@ class TimingMiddleware(BaseHTTPMiddleware):
 
 
 def register_middleware(app: FastAPI):
-    """注册所有中间件"""
+    """注册所有中间件（异常捕获 + 计时 + 限流）"""
     register_exception_handlers(app)
     app.add_middleware(TimingMiddleware)
+    # SlowAPI 限流中间件（必须注册在 TimingMiddleware 之后，否则计时会算上判断耗时）
+    app.add_middleware(SlowAPIMiddleware)

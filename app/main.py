@@ -23,13 +23,24 @@ from app.auth import (
     hash_password, verify_password, create_access_token,
     get_current_user, get_optional_user, require_admin,
 )
-from app.middleware import register_middleware as setup_middleware
+from app.middleware import register_middleware as setup_middleware, limiter
 from app.logger import get_logger
+from config.settings import settings
+from slowapi.errors import RateLimitExceeded
 
 app_log = get_logger("app")
 auth_log = get_logger("auth")
 
 app = FastAPI(title="服装电商智能客服", version="0.2.0")
+app.state.limiter = limiter  # slowapi 要求挂载到 app.state
+
+# 注册限流超限时的友好错误响应
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request, exc):
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "请求太频繁了，请稍后再试。"},
+    )
 
 # 注册中间件栈（全局异常捕获 + 请求计时 + 限流）
 setup_middleware(app)
@@ -325,7 +336,8 @@ async def admin_get_order(order_id: int, user: dict = Depends(require_admin)):
 # ==================== 聊天路由 ====================
 
 @app.post("/chat")
-async def chat_api(req: ChatRequest, user: dict | None = Depends(get_optional_user)):
+@limiter.limit(settings.RATE_LIMIT_CHAT_PER_IP)
+async def chat_api(req: ChatRequest, request: Request, user: dict | None = Depends(get_optional_user)):
     """
     对话接口（向后兼容：未登录也可使用基础功能）。
 

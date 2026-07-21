@@ -22,6 +22,7 @@ Agent 启动时初始化一次，后续所有请求共用同一个实例。
 import contextvars
 from langchain_deepseek import ChatDeepSeek
 from langgraph.prebuilt import create_react_agent
+from langgraph.errors import GraphRecursionError
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -124,7 +125,10 @@ async def _invoke_agent(agent, messages: list) -> dict:
     """调用 Agent，支持自动重试（指数退避：2s → 4s → 8s）"""
     import time
     start = time.perf_counter()
-    result = await agent.ainvoke({"messages": messages})
+    result = await agent.ainvoke(
+        {"messages": messages},
+        config={"recursion_limit": 10},  # 防止死循环
+    )
     elapsed = round((time.perf_counter() - start) * 1000, 2)
     llm_log.info("LLM 调用完成: %.2fms model=%s", elapsed, settings.DEEPSEEK_MODEL)
     return result
@@ -133,20 +137,54 @@ async def _invoke_agent(agent, messages: list) -> dict:
 # ==================== 公开接口 ====================
 
 async def _build_messages(message: str, user_id: int | None, session_id: int | None) -> list:
-    """构建发送给 Agent 的消息列表（供 chat 和 chat_stream 共用）"""
+    """构建发送给 Agent 的消息列表（供 chat 和 chat_stream 共用）
+
+    两阶段截断策略：
+    1. 消息数截断 — 保留最近 N 条（可配置，默认 20）
+    2. 字符数安全网 — 若总字符数超过阈值，从最早消息开始丢弃
+       （始终保留 system prompt 和当前用户消息）
+    """
     messages = [("system", SYSTEM_PROMPT)]
 
     if user_id is not None and session_id is not None:
         try:
             from app.database import get_session_messages
-            history = get_session_messages(session_id, user_id)
-            for msg in history[-20:]:
+            max_msgs = settings.MAX_HISTORY_MESSAGES
+            history = get_session_messages(session_id, user_id, limit=max_msgs)
+
+            for msg in history:
                 role = "assistant" if msg["role"] == "assistant" else "user"
                 messages.append((role, msg["content"]))
         except Exception:
             pass
 
     messages.append(("user", message))
+
+    # 阶段 B：字符数安全网 — 用 len() 估算 token 量
+    # 中文字符 ≈ 1~2 token，英文字符 ≈ 0.25 token。len() 是保守估计（偏高），
+    # 会提前触发裁剪而非触顶才裁，这是安全方向。
+    char_limit = settings.MAX_HISTORY_CHAR_LIMIT
+    total_chars = sum(len(text) for _, text in messages)
+
+    if total_chars > char_limit:
+        before_count = len(messages) - 2  # 历史消息数（排除 system + 当前用户）
+        reserve_chars = len(SYSTEM_PROMPT) + len(message)
+        available = char_limit - reserve_chars
+        kept_history = []
+        for role, text in reversed(messages[1:-1]):
+            if available - len(text) >= 0:
+                kept_history.insert(0, (role, text))
+                available -= len(text)
+            else:
+                break
+        messages = [messages[0]] + kept_history + [messages[-1]]
+        after_count = len(kept_history)
+        after_chars = sum(len(t) for _, t in messages)
+        llm_log.warning(
+            "历史消息触发字符数安全裁剪: %d 条 → %d 条, 预估字符 %d → %d (阈值 %d)",
+            before_count, after_count, total_chars, after_chars, char_limit,
+        )
+
     return messages
 
 
@@ -184,6 +222,9 @@ async def chat(
 
     try:
         result = await _invoke_agent(agent, messages)
+    except GraphRecursionError:
+        llm_log.warning("Agent 递归超限，强制终止（recursion_limit=%d）", 10)
+        return "抱歉，处理您的请求时步骤过多，请简化问题后重试。", None
     except RetryError as e:
         llm_log.error("LLM 调用全部重试失败: %s", e)
         return "抱歉，AI 服务暂时不可用，请稍后重试。如急需帮助请联系人工客服。", None
@@ -243,7 +284,11 @@ async def chat_stream(
     stream_start = time.perf_counter()
 
     try:
-        async for event in agent.astream_events({"messages": messages}, version="v2"):
+        async for event in agent.astream_events(
+            {"messages": messages},
+            config={"recursion_limit": 10},
+            version="v2",
+        ):
             if event["event"] != "on_chat_model_stream":
                 continue
 
@@ -267,6 +312,10 @@ async def chat_stream(
             if run_id == run_order[-1]:
                 yield {"type": "token", "content": content}
 
+    except GraphRecursionError:
+        llm_log.warning("Agent 递归超限（流式），强制终止")
+        yield {"type": "error", "message": "处理步骤过多，请简化问题后重试。"}
+        return
     except RetryError:
         yield {"type": "error", "message": "AI 服务暂时不可用，请稍后重试。"}
         return

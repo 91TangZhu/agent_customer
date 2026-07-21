@@ -291,18 +291,29 @@ def get_session_by_id(session_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-def get_session_messages(session_id: int, user_id: int) -> list[dict]:
-    """获取会话的所有消息，按时间正序"""
+def get_session_messages(session_id: int, user_id: int, limit: int | None = None) -> list[dict]:
+    """获取会话的消息，按时间正序。
+
+    limit=None 时返回全部消息（供前端查看历史），
+    limit=N 时只返回最近 N 条（供 Agent 构建上下文）。
+    """
     conn = get_connection()
-    rows = conn.execute(
-        "SELECT * FROM chat_messages WHERE session_id = ? AND user_id = ? ORDER BY created_at ASC",
-        (session_id, user_id),
-    ).fetchall()
+    if limit is not None:
+        # DESC + reversed: 取最近 N 条后按时间正序排列
+        rows = conn.execute(
+            "SELECT * FROM chat_messages WHERE session_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT ?",
+            (session_id, user_id, limit),
+        ).fetchall()
+        rows = list(reversed(rows))
+    else:
+        rows = conn.execute(
+            "SELECT * FROM chat_messages WHERE session_id = ? AND user_id = ? ORDER BY created_at ASC",
+            (session_id, user_id),
+        ).fetchall()
     conn.close()
     results = []
     for r in rows:
         d = dict(r)
-        # 反序列化 citations JSON
         if d.get("citations"):
             import json
             try:

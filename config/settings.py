@@ -53,6 +53,13 @@ class Settings:
     # /chat 接口每分钟每 IP 最大请求数
     RATE_LIMIT_CHAT_PER_IP: str = os.getenv("RATE_LIMIT_CHAT_PER_IP", "60/minute")
 
+    # --- 对话历史 ---
+    # 保留最近 N 条消息作为上下文（20 条约 10 轮对话）
+    MAX_HISTORY_MESSAGES: int = int(os.getenv("MAX_HISTORY_MESSAGES", "20"))
+    # 字符数安全阈值：prompt 总字符数超过此值时自动从最早消息裁剪
+    # 默认 80000 字符（中文字符 ÷2 ≈ token，约 40000 token，占 128K 窗口 30%，留足余量）
+    MAX_HISTORY_CHAR_LIMIT: int = int(os.getenv("MAX_HISTORY_CHAR_LIMIT", "80000"))
+
 
 # 全局单例，其他模块直接 from config.settings import settings 使用
 settings = Settings()

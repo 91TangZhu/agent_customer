@@ -7,8 +7,8 @@
 
 ## 当前状态
 
-- **版本**: v0.3.1
-- **最后更新**: 2026-07-17
+- **版本**: v0.3.3
+- **最后更新**: 2026-07-21
 - **进行中**: 无
 - **待办**: 见下方「待办事项」
 
@@ -305,6 +305,37 @@
 - **验证**: 登录 API 200, 页面所有 JS 函数完整, 流式首 token 971ms, 全链路测试通过
 
 
+### [2026-07-20] 基础设施: 对话历史可配置化 + Token 安全裁剪
+
+- **类型**: 基础设施
+- **问题**: 历史消息数硬编码 `history[-20:]`，不可配置；无 token 预算安全网，单条超长回复可撑爆上下文
+- **概述**:
+  - `config/settings.py` 新增 `MAX_HISTORY_MESSAGES`（默认 20）+ `MAX_HISTORY_CHAR_LIMIT`（默认 80000）两个配置项
+  - `app/database.py` 的 `get_session_messages()` 新增 `limit` 参数，SQL 层 `ORDER BY created_at DESC LIMIT ?`，避免拉全量再 Python 切片
+  - `app/agent.py:_build_messages()` 两阶段截断：阶段 A 按消息数（DB LIMIT）→ 阶段 B 按字符数安全网（`len()` 估算 token，超阈值从最早消息丢弃，system prompt + 当前用户消息永不丢）
+  - `.env.example` 新增对话历史配置段
+  - 方案：轮数截断（非语义压缩），客服场景对话浅而窄(3~5轮)，语义压缩额外 LLM 调用反而增加延迟
+- **影响文件**: `config/settings.py`, `app/database.py`, `app/agent.py`, `.env.example`
+- **方案**: 两阶段截断——消息数截断是常态路径（默认 20 条不变），字符数安全网只兜底长回复边缘 case。用 `len()` 而非 tokenizer 库（零依赖，保守估计偏安全方向）
+- **验证**: 默认行为不变（MAX_HISTORY_MESSAGES=20 等价于原硬编码）；降低 MAX_HISTORY_CHAR_LIMIT=500 触发裁剪日志；匿名用户无历史正常对话
+
+
+### [2026-07-21] 修复: API 限流空壳补全 + Agent 死循环防护
+
+- **类型**: Bug 修复
+- **问题**: (1) settings.py 和 .env.example 中 RATE_LIMIT 配置存在，但代码中从未注册 slowapi 限流器，/chat 接口零限流保护 (2) Agent 无 recursion_limit，理论上可无限循环调用工具烧 token
+- **概述**:
+  - `app/middleware.py` — 创建 `Limiter(key_func=get_remote_address)` + 注册 `SlowAPIMiddleware`
+  - `app/main.py` — `app.state.limiter = limiter` + `/chat` 加 `@limiter.limit("60/minute")` + 429 友好提示 + `request: Request` 参数
+  - `app/agent.py` — `ainvoke` 和 `astream_events` 均传入 `config={"recursion_limit": 10}` + catch `GraphRecursionError` 返回友好提示
+  - `ISSUES_LOG.md` — 新增批次 #5 记录
+  - `PROJECT_SUMMARY.md` — 版本同步至 v0.3.3
+- **影响文件**: `app/middleware.py`, `app/main.py`, `app/agent.py`, `ISSUES_LOG.md`, `PROJECT_SUMMARY.md`
+- **方案**: 限流用 slowapi（已在 requirements.txt 中），IP 级 60 次/分钟；递归限制 10 步（客服正常 2~4 步），超限 LangGraph 抛 GraphRecursionError 被 catch
+- **验证**: /health 200, /chat 200, 限流器就位不再 500, recursion_limit 导入正常
+- **踩坑**: ① recursion_limit 是 ainvoke config 参数不是 create_react_agent 参数 ② slowapi 需要 app.state.limiter 否则全部 500 ③ @limiter.limit 要求路由函数有 request 参数
+
+
 ## 待办事项
 
 | 优先级 | 内容 | 状态 |
@@ -326,7 +357,8 @@
 
 | # | 触发条件 | 检查项 | 来源 |
 |---|---------|--------|------|
-| 1 | 修改 `CHAT_PAGE` 或 `BENCHMARK_PAGE` raw string 内的 JavaScript | `curl -s http://localhost:8000/ -o /tmp/page.html && python -c "..."` 提取 `<script>` 内容 → `node --check` 验证语法无误 | 批次 #3 + #4：Python raw string 中的字面换行导致 JS 语法错误，整个页面 JS 瘫痪 |
+| 1 | 用户提出技术方案/选型建议时 | **先质疑再验证**：不要默认用户是对的。结合项目实际场景（客服 Agent，非通用助手）判断方案是否过重、是否与企业实际落地做法一致。用户说"企业大部分是轮数截断"后又改口"语义压缩"——前后矛盾，应该指出而非两头附和。复盘：客服场景对话浅而窄(3~5轮)，语义压缩需额外LLM调用反而增加延迟和成本，轮数截断才是正解 | 2026-07-20 用户反馈：Claude 无判断力，两头附和 |
+| 2 | 修改 `CHAT_PAGE` 或 `BENCHMARK_PAGE` raw string 内的 JavaScript | `curl -s http://localhost:8000/ -o /tmp/page.html && python -c "..."` 提取 `<script>` 内容 → `node --check` 验证语法无误 | 批次 #3 + #4：Python raw string 中的字面换行导致 JS 语法错误，整个页面 JS 瘫痪 |
 
 执行方法（Windows 环境）：
 ```bash

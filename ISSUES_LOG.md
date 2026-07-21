@@ -247,6 +247,39 @@ Python raw string 中写 `\n` → 输出为两个字面字符 `\` `n` → JS 正
 
 ---
 
+## 批次 #5 — 2026-07-21（API 限流空壳 + LLM 死循环无防护）
+
+### 现象
+用户询问"别人用我的网站会不会刷爆 API Token"时，发现 `settings.py` 和 `.env.example` 中已配置了 `RATE_LIMIT_CHAT_PER_USER=30/minute` 和 `RATE_LIMIT_CHAT_PER_IP=60/minute`，但实际代码中**完全没有注册限流器**，相当于大门敞开。
+
+### 排查
+1. `middleware.py` 文件注释写"限流（Phase 6 集成）"，但 Body 里只有异常捕获 + 计时
+2. `main.py` 全文件搜索 `slowapi` / `limiter` / `Limit` → 零匹配
+3. 确认限流只存在于配置文件中，代码层面为零防护
+
+同样地，用户追问"Agent 死循环一直烧 token 怎么办"时，检查 `agent.py` 发现：
+- `create_react_agent` 和 `ainvoke` / `astream_events` 均未设置 `recursion_limit`
+- LangGraph 默认 recursion_limit=25，客服场景正常只需 2~4 步，25 步刷掉几十次 API 调用
+
+### 修复
+
+**限流（slowapi）**:
+1. `middleware.py` — 创建 `Limiter(key_func=get_remote_address)`，`register_middleware()` 注册 `SlowAPIMiddleware`
+2. `main.py` — `app.state.limiter = limiter`（必需，否则 SlowAPIMiddleware 启动报 AttributeError），`/chat` 路由加 `@limiter.limit(settings.RATE_LIMIT_CHAT_PER_IP)`（60/minute/IP），429 错误友好提示
+
+**防死循环（recursion_limit）**:
+3. `agent.py` — `_invoke_agent` 的 `ainvoke` 和 `chat_stream` 的 `astream_events` 均传入 `config={"recursion_limit": 10}`
+4. `agent.py` — 导入 `GraphRecursionError`，`chat()` 和 `chat_stream()` 中 catch 该异常返回友好提示
+
+### 踩坑
+- `recursion_limit` 是 `ainvoke`/`astream_events` 调用时 `config` 参数传递，不是 `create_react_agent` 的参数
+- slowapi 的 `@limiter.limit()` 装饰器要求路由函数有 `request: Request` 参数，否则报 `No "request" or "websocket" argument on function`
+- slowapi 必须在 `app.state.limiter = limiter` 设置后才能正常工作，否则所有请求 500
+
+- **影响文件**: `app/middleware.py`, `app/main.py`, `app/agent.py`
+
+---
+
 ## 历史批次
 
 （待后续补充）
