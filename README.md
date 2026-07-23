@@ -90,7 +90,7 @@ uvicorn app.main:app --reload
 
 ---
 
-## 🏗️ 架构决策（面试重点）
+## 🏗️ 架构决策
 
 以下记录了本项目从"能跑"到"能落地"过程中做出的关键工程决策。
 
@@ -265,7 +265,6 @@ agent_customer/
 ├── requirements.txt            # pip 依赖清单
 ├── PROJECT_SUMMARY.md         # 项目档案（技术栈/数据库/约束/Skills/Agents）
 ├── CLAUDE_PROGRESS.md         # 开发进度追踪（时间线 + 待办 + 踩坑记录）
-├── INTERVIEW_PREP.md          # 面试准备（架构图/核心亮点/话术/关键词自查）
 └── ISSUES_LOG.md              # 问题记录与修复日志
 ```
 
@@ -314,4 +313,4 @@ Agent: 根据知识库中的男装上衣尺码指南：
 
 ---
 
-*更多技术细节见 [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md)（项目档案）、[INTERVIEW_PREP.md](INTERVIEW_PREP.md)（面试准备）、[CLAUDE_PROGRESS.md](CLAUDE_PROGRESS.md)（开发进度）。*
+*更多技术细节见 [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md)（项目档案）、[CLAUDE_PROGRESS.md](CLAUDE_PROGRESS.md)（开发进度）。*

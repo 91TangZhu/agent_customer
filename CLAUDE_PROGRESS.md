@@ -29,7 +29,7 @@
     1. 缓存 RAG 结果而非 LLM 回复——RAG 是纯函数，LLM 回复依赖上下文
     2. 缓存在此的首要价值是"一致性"（所有人基于同一知识源）和"去重"（同一查询只检索一次），速度只是副作用
     3. 缓存永远是旁路——所有 Redis 操作 try/except 包裹，挂了不影响服务
-  - **架构决策文档化**: README.md 新增「架构决策」章节（多路召回 / 语义缓存 / 重排序取舍 / 熔断器设计），PROJECT_SUMMARY.md 新增 ADR 章节，INTERVIEW_PREP.md 更新至 v0.4.1
+  - **架构决策文档化**: README.md 新增「架构决策」章节（多路召回 / 语义缓存 / 重排序取舍 / 熔断器设计），PROJECT_SUMMARY.md 新增 ADR 章节
 - **修改文件**:
   - `app/cache.py` — 完全重写：LLM 回复缓存 → RAG 检索缓存，含 query 归一化
   - `app/rag.py` — `search_similar()` 加 3 步缓存层（查缓存→检索→写缓存 fire-and-forget）

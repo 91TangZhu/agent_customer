@@ -41,8 +41,6 @@
 
 ## 架构决策记录 (ADR)
 
-> 这些是从"能跑"到"能落地"的关键设计决策，面试时重点讲。
-
 ### ADR-1: 多路召回 (hybrid = dense + sparse)
 
 - **问题**: 纯向量检索对短货号（`T-SU-WH-L`）几乎无效，向量模型未见过这类字符串
@@ -173,7 +171,6 @@ agent_customer/
 ├── README.md                   # 项目说明（含架构决策章节）
 ├── PROJECT_SUMMARY.md          # 本文件 — 项目档案
 ├── CLAUDE_PROGRESS.md          # 开发进度追踪
-├── INTERVIEW_PREP.md           # 面试准备文档
 └── ISSUES_LOG.md               # 问题记录与修复日志
 ```
 
